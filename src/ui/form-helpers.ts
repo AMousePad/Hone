@@ -416,11 +416,12 @@ export function createContextSettingsPanel(
   section.appendChild(
     makeNumberRow(
       "Max Lorebook Tokens",
-      "Maximum tokens of activated lorebook content to include. Empty = unlimited.",
+      "Maximum tokens of activated lorebook content to include. Empty = default (50000).",
       () => settings.maxLorebookTokens,
       (val) => sendUpdate({ maxLorebookTokens: val }),
       0, 5000000,
-      "Unlimited"
+      undefined,
+      50000
     )
   );
   section.appendChild(

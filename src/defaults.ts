@@ -21,7 +21,7 @@ export const DEFAULT_SETTINGS: HoneSettings = {
   userEnhanceMode: "post",
   userPov: "1st",
 
-  maxLorebookTokens: 0,
+  maxLorebookTokens: 50000,
   maxMessageContextTokens: 4000,
 
   generationTimeoutSecs: 120,
