@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# TypeScript incremental cache
+*.tsbuildinfo
+
+# Generated asset modules (regenerated at build time by scripts/gen-asset-modules.ts)
+src/ui/generated/
+
+# Local scratch / tests
+tmp/
+local_tests/
+vendor/
+
+# Logs
+*.log
+
+# Env files
+.env
+.env.*
+!.env.example

@@ -1,0 +1,115 @@
+import type { SpindleFrontendContext } from "lumiverse-spindle-types";
+import type {
+  FrontendToBackend,
+  BackendToFrontend,
+  HoneSettings,
+  ModelProfileSummary,
+} from "../types";
+import { createPresetPanel } from "./preset-panel";
+import {
+  makeDescription,
+  makeSelectRow,
+  makeSubtabBar,
+  createContextSettingsPanel,
+} from "./form-helpers";
+
+export function createInputPanel(
+  ctx: SpindleFrontendContext,
+  sendToBackend: (msg: FrontendToBackend) => void,
+  root: HTMLElement
+) {
+
+  let currentSettings: HoneSettings | null = null;
+  let modelProfiles: ModelProfileSummary[] = [];
+
+  const panel = createPresetPanel({
+    ctx,
+    slot: "input",
+    root,
+    sendToBackend,
+    modelProfiles,
+    onStateChanged: render,
+  });
+
+  let activeSubtab = "pipeline";
+  const subtabs = makeSubtabBar(
+    [
+      { id: "pipeline", label: "Pipeline" },
+      { id: "prompts", label: "Prompts" },
+      { id: "context", label: "Context" },
+    ],
+    activeSubtab,
+    (id) => { activeSubtab = id; render(); }
+  );
+
+  function sendUpdate(partial: Partial<HoneSettings>) {
+    sendToBackend({ type: "update-settings", settings: partial });
+  }
+
+  function render() {
+    root.innerHTML = "";
+    if (!currentSettings) {
+      root.appendChild(makeDescription("Loading..."));
+      return;
+    }
+    const s = currentSettings;
+
+    root.appendChild(panel.buildBar());
+
+    root.appendChild(
+      makeSelectRow(
+        "User Message PoV",
+        "Point of view to enforce for your messages.",
+        [
+          { value: "auto", label: "Auto-detect" },
+          { value: "1st", label: "First Person" },
+          { value: "2nd", label: "Second Person" },
+          { value: "3rd", label: "Third Person" },
+        ],
+        () => s.userPov,
+        (val) => sendUpdate({ userPov: val as any })
+      )
+    );
+
+    root.appendChild(subtabs.bar);
+
+    const content = document.createElement("div");
+    content.className = "hone-subtab-content";
+
+    switch (activeSubtab) {
+      case "pipeline":
+        content.appendChild(panel.renderPipelineConfig());
+        break;
+      case "prompts":
+        content.appendChild(panel.renderPromptLibrary());
+        break;
+      case "context":
+        content.appendChild(createContextSettingsPanel(s, sendUpdate));
+        break;
+    }
+
+    root.appendChild(content);
+  }
+
+  function handleBackendMessage(msg: BackendToFrontend) {
+    panel.handleBackendMessage(msg);
+
+    switch (msg.type) {
+      case "settings":
+        currentSettings = msg.settings;
+        panel.onSettings(msg.settings);
+        break;
+      case "model-profiles":
+        modelProfiles = msg.profiles;
+        panel.setModelProfiles(modelProfiles);
+        break;
+    }
+    // Parent (drawer.ts) calls renderActivePanel() after delegation;
+    // don't auto-render here.
+  }
+
+  return {
+    handleBackendMessage,
+    render,
+  };
+}

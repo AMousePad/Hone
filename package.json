@@ -1,0 +1,18 @@
+{
+  "name": "hone-lumiverse",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "gen:assets": "bun scripts/gen-asset-modules.ts",
+    "build:backend": "bun build src/backend.ts --outfile dist/backend.js --target bun",
+    "build:frontend": "bun run gen:assets && bun build src/frontend.ts --outfile dist/frontend.js --target browser",
+    "build": "bun run typecheck && bun run build:backend && bun run build:frontend",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --dir local_tests"
+  },
+  "devDependencies": {
+    "lumiverse-spindle-types": "0.4.20",
+    "typescript": "^6.0.2",
+    "vitest": "^3.0.0"
+  }
+}

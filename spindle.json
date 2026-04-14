@@ -1,0 +1,20 @@
+{
+  "version": "0.1.0",
+  "name": "Hone",
+  "identifier": "hone",
+  "author": "Mousepad",
+  "github": "https://github.com/AMousePad/Hone",
+  "homepage": "https://github.com/AMousePad/Hone",
+  "description": "Refine AI responses and enhance user messages with configurable quality rules.",
+  "permissions": [
+    "chat_mutation",
+    "chats",
+    "characters",
+    "world_books",
+    "generation",
+    "ui_panels"
+  ],
+  "entry_backend": "dist/backend.js",
+  "entry_frontend": "dist/frontend.js",
+  "minimum_lumiverse_version": "0.8.6"
+}

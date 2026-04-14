@@ -1,0 +1,26 @@
+Hone
+Copyright 2026 AMousePad
+
+Licensed under the Hone Community License, Version 1.0 (see LICENSE).
+
+The Hone Community License is adapted by permission from the Lumiverse
+Community License Version 2.0 (Copyright 2025-2026 Darran Hall / Prolix OCs).
+See the LICENSE file in this directory for the full text.
+
+--------------------------------------------------------------------------------
+Third-party / separately-licensed content
+--------------------------------------------------------------------------------
+
+The files under `built-in-presets/` are licensed separately under the
+Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International
+License (CC BY-NC-SA 4.0). See `built-in-presets/LICENSE` for the license
+text and `built-in-presets/NOTICE.md` for per-file attribution.
+
+The bundled prompt text in those preset files is adapted from ReDraft by
+MeowCatboyMeow (https://github.com/MeowCatboyMeow/ReDraft), originally released under
+CC BY-NC-SA 4.0. ShareAlike applies: modified versions of those preset
+files must remain under CC BY-NC-SA 4.0.
+
+Derivative distributions of this repository may omit the `built-in-presets/`
+directory to avoid the CC-BY-NC-SA obligations; the remainder of the
+codebase remains governed by the Hone Community License.
