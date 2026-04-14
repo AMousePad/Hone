@@ -195,6 +195,7 @@ Do not invent new lore. When uncertain, preserve the original phrasing rather th
         "character-context",
         "persona-context",
         "pov-context",
+        "lore-context",
         "context-block",
         "rules-header"
       ],
@@ -404,6 +405,7 @@ Do not invent new lore. When uncertain, preserve the original phrasing rather th
         "character-context",
         "persona-context",
         "pov-context",
+        "lore-context",
         "context-block",
         "rules-header"
       ],
@@ -621,6 +623,7 @@ Do not invent new lore. When uncertain, preserve the original phrasing rather th
         "character-context",
         "persona-context",
         "pov-context",
+        "lore-context",
         "context-block",
         "rules-header"
       ],
@@ -1123,8 +1126,8 @@ FIX: Vary attribution toward a natural mix: some "said," some action tags, some 
         "character-context",
         "persona-context",
         "pov-context",
-        "context-block",
         "lore-context",
+        "context-block",
         "rules-header"
       ],
       strategy: "pipeline",
@@ -1579,8 +1582,8 @@ FIX: Vary attribution toward a natural mix: some "said," some action tags, some 
         "character-context",
         "persona-context",
         "pov-context",
-        "context-block",
         "lore-context",
+        "context-block",
         "rules-header"
       ],
       strategy: "pipeline",
@@ -2045,8 +2048,8 @@ FIX: Vary attribution toward a natural mix: some "said," some action tags, some 
         "character-context",
         "persona-context",
         "pov-context",
-        "context-block",
         "lore-context",
+        "context-block",
         "rules-header"
       ],
       strategy: "pipeline",
@@ -2356,6 +2359,7 @@ Do not invent new lore. When uncertain, preserve the original phrasing rather th
         "character-context",
         "persona-context",
         "pov-context",
+        "lore-context",
         "context-block",
         "rules-header"
       ],
@@ -2759,8 +2763,8 @@ FIX: Replace protagonist-biased behavior with what the character's personality a
         "character-context",
         "persona-context",
         "pov-context",
-        "context-block",
         "lore-context",
+        "context-block",
         "rules-header"
       ],
       strategy: "parallel",
@@ -3242,8 +3246,8 @@ Weave true.`
         "character-context",
         "persona-context",
         "pov-context",
-        "context-block",
         "lore-context",
+        "context-block",
         "rules-header"
       ],
       strategy: "parallel",
@@ -3893,7 +3897,7 @@ var DEFAULT_SETTINGS = {
   userAutoEnhance: false,
   userEnhanceMode: "post",
   userPov: "1st",
-  maxLorebookTokens: 0,
+  maxLorebookTokens: 50000,
   maxMessageContextTokens: 4000,
   generationTimeoutSecs: 120,
   minCharThreshold: 20,
@@ -6658,6 +6662,14 @@ spindle.on("MESSAGE_SWIPED", async (payload, userId) => {
   if (action === "deleted") {
     await enqueueChatOperation(`${userId}:${chatId}`, () => handleSwipeDeletion(userId, chatId, message.id, swipeId));
   }
+  await sendRefinedStateFor(userId);
+});
+spindle.on("MESSAGE_DELETED", async (payload, userId) => {
+  const { chatId, messageId } = payload || {};
+  if (!userId || !chatId || !messageId)
+    return;
+  debug(userId, `MESSAGE_DELETED chat=${chatId.slice(0, 8)} msg=${messageId.slice(0, 8)}`);
+  await enqueueChatOperation(`${userId}:${chatId}`, () => replaceUndoFileForMessage(userId, chatId, messageId, []));
   await sendRefinedStateFor(userId);
 });
 async function init() {
