@@ -1002,6 +1002,17 @@ spindle.on("MESSAGE_SWIPED", async (payload: any, userId?: string) => {
   await sendRefinedStateFor(userId);
 });
 
+spindle.on("MESSAGE_DELETED", async (payload: any, userId?: string) => {
+  const { chatId, messageId } = payload || {};
+  if (!userId || !chatId || !messageId) return;
+  hlog.debug(userId, `MESSAGE_DELETED chat=${chatId.slice(0, 8)} msg=${messageId.slice(0, 8)}`);
+
+  await enqueueChatOperation(`${userId}:${chatId}`, () =>
+    replaceUndoFileForMessage(userId, chatId, messageId, [])
+  );
+  await sendRefinedStateFor(userId);
+});
+
 // CHAT_CHANGED fires only on chat metadata updates (title, favorite,
 // avatar, reattribution); never affects refined-state for the last
 // message, so no backend listener.
