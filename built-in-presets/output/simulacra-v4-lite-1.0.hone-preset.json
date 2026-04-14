@@ -141,8 +141,8 @@
       "character-context",
       "persona-context",
       "pov-context",
-      "context-block",
       "lore-context",
+      "context-block",
       "rules-header"
     ],
     "strategy": "pipeline",

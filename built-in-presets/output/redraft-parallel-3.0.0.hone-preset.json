@@ -101,6 +101,7 @@
       "character-context",
       "persona-context",
       "pov-context",
+      "lore-context",
       "context-block",
       "rules-header"
     ],
