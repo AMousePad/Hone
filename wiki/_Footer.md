@@ -1,1 +1,0 @@
-Hone by **AMousePad** · [GitHub](https://github.com/AMousePad/Hone) · Discord: `amousepad` · Presets licensed under [CC BY-NC-SA 4.0](../built-in-presets/LICENSE); code under the [Hone Community License](../LICENSE.md).
