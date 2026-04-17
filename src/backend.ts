@@ -37,6 +37,15 @@ import {
   duplicateModelProfile,
   DEFAULT_PROFILE_ID,
 } from "./model-profiles";
+import {
+  listPovPresets,
+  savePovPreset,
+  deletePovPreset,
+  duplicatePovPreset,
+  isBuiltInPovPresetId,
+  DEFAULT_POV_PRESET_ID,
+  DEFAULT_USER_POV_PRESET_ID,
+} from "./pov-presets";
 import * as hlog from "./hlog";
 
 const grantedPermissions = new Set<string>();
@@ -803,6 +812,74 @@ spindle.onFrontendMessage(async (raw, userId) => {
           send({ type: "model-profiles", profiles: await listModelProfiles(userId) });
         } else {
           hlog.debug(userId, `ipc duplicate-model-profile: source "${msg.id}" not found`);
+        }
+        break;
+      }
+
+      case "list-pov-presets": {
+        hlog.debug(userId, `ipc in: list-pov-presets`);
+        const presets = await listPovPresets(userId);
+        send({ type: "pov-presets", presets });
+        break;
+      }
+
+      case "save-pov-preset": {
+        hlog.debug(userId, `ipc in: save-pov-preset id="${msg.preset.id}"`);
+        try {
+          if (isBuiltInPovPresetId(msg.preset.id)) {
+            throw new Error(
+              `Cannot save over built-in POV preset "${msg.preset.id}"; duplicate it first.`
+            );
+          }
+          await savePovPreset(userId, msg.preset);
+          send({ type: "pov-presets", presets: await listPovPresets(userId) });
+        } catch (err) {
+          const error = err instanceof Error ? err.message : String(err);
+          spindle.log.warn(`[Hone] save-pov-preset failed: ${error}`);
+          send({ type: "pov-presets", presets: await listPovPresets(userId) });
+          send({ type: "pov-preset-error", error: `Failed to save POV preset: ${error}` });
+        }
+        break;
+      }
+
+      case "delete-pov-preset": {
+        hlog.debug(userId, `ipc in: delete-pov-preset id="${msg.id}"`);
+        try {
+          if (isBuiltInPovPresetId(msg.id)) {
+            throw new Error(`Cannot delete built-in POV preset "${msg.id}".`);
+          }
+          await deletePovPreset(userId, msg.id);
+          const settings = await getSettings(userId);
+          const patch: Partial<import("./types").HoneSettings> = {};
+          if (settings.pov === msg.id) patch.pov = DEFAULT_POV_PRESET_ID;
+          if (settings.userPov === msg.id) patch.userPov = DEFAULT_USER_POV_PRESET_ID;
+          if (Object.keys(patch).length > 0) {
+            const updated = await updateSettings(userId, patch);
+            send({ type: "settings", settings: updated });
+          }
+          send({ type: "pov-presets", presets: await listPovPresets(userId) });
+        } catch (err) {
+          const error = err instanceof Error ? err.message : String(err);
+          spindle.log.warn(`[Hone] delete-pov-preset failed: ${error}`);
+          send({ type: "pov-presets", presets: await listPovPresets(userId) });
+          send({ type: "pov-preset-error", error: `Failed to delete POV preset: ${error}` });
+        }
+        break;
+      }
+
+      case "duplicate-pov-preset": {
+        hlog.debug(userId, `ipc in: duplicate-pov-preset id="${msg.id}" slot=${msg.slot}`);
+        try {
+          const copy = await duplicatePovPreset(userId, msg.id);
+          const settingsKey = msg.slot === "input" ? "userPov" : "pov";
+          const updated = await updateSettings(userId, { [settingsKey]: copy.id });
+          send({ type: "settings", settings: updated });
+          send({ type: "pov-presets", presets: await listPovPresets(userId) });
+        } catch (err) {
+          const error = err instanceof Error ? err.message : String(err);
+          spindle.log.warn(`[Hone] duplicate-pov-preset failed: ${error}`);
+          send({ type: "pov-presets", presets: await listPovPresets(userId) });
+          send({ type: "pov-preset-error", error: `Failed to duplicate POV preset: ${error}` });
         }
         break;
       }

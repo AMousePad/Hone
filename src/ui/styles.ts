@@ -1218,6 +1218,38 @@ export const STYLES = `
   border-top: 1px solid var(--lumiverse-border);
 }
 
+.hone-pov-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.hone-pov-editor__bar {
+  margin-bottom: 0;
+}
+.hone-pov-editor__textarea {
+  width: 100%;
+  min-height: 84px;
+  padding: 8px 10px;
+  border: 1px solid var(--lumiverse-border);
+  border-radius: var(--lumiverse-radius, 4px);
+  background: var(--lumiverse-fill, transparent);
+  color: var(--lumiverse-text);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  resize: vertical;
+  box-sizing: border-box;
+}
+.hone-pov-editor__textarea:focus {
+  border-color: var(--lumiverse-primary);
+  outline: none;
+}
+.hone-pov-editor__textarea[readonly] {
+  opacity: 0.75;
+  cursor: default;
+}
+
 .hone-readonly-toast {
   position: fixed;
   top: 20px;

@@ -1,6 +1,7 @@
 import type { HoneSettings } from "./types";
 import { DEFAULT_ACTIVE_PRESET_ID, DEFAULT_INPUT_ACTIVE_PRESET_ID } from "./preset-defaults";
 import { DEFAULT_PROFILE_ID } from "./constants";
+import { DEFAULT_POV_PRESET_ID, DEFAULT_USER_POV_PRESET_ID } from "./pov-presets";
 
 /** Fresh-user defaults. Every field in HoneSettings must appear here;
  *  `mergeSettingsWithDefaults` uses this as the shape source when
@@ -13,13 +14,13 @@ export const DEFAULT_SETTINGS: HoneSettings = {
   currentPresetId: DEFAULT_ACTIVE_PRESET_ID,
   currentInputPresetId: DEFAULT_INPUT_ACTIVE_PRESET_ID,
 
-  pov: "auto",
+  pov: DEFAULT_POV_PRESET_ID,
   autoShowDiff: true,
 
   userEnhanceEnabled: true,
   userAutoEnhance: false,
   userEnhanceMode: "post",
-  userPov: "1st",
+  userPov: DEFAULT_USER_POV_PRESET_ID,
 
   maxLorebookTokens: 50000,
   maxMessageContextTokens: 4000,

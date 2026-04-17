@@ -239,6 +239,18 @@ export function setup(ctx: SpindleFrontendContext) {
           }).catch(() => {});
         }
         break;
+
+      case "pov-preset-error":
+        if (msg.error) {
+          ctx.ui.showConfirm({
+            title: "POV preset error",
+            message: msg.error,
+            confirmLabel: "OK",
+            cancelLabel: "Dismiss",
+            variant: "danger",
+          }).catch(() => {});
+        }
+        break;
     }
   });
   cleanups.push(msgUnsub);
@@ -252,6 +264,7 @@ export function setup(ctx: SpindleFrontendContext) {
     // pipeline editor; fetched at handshake so the editor renders
     // with the right options on first paint.
     sendToBackend({ type: "list-model-profiles" });
+    sendToBackend({ type: "list-pov-presets" });
     sendToBackend({ type: "get-active-chat" });
   }
 

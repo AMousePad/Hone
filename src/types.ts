@@ -15,7 +15,7 @@ export interface HoneSettings {
    *  preset's pipeline and prompt library. */
   currentInputPresetId: string;
 
-  pov: PovMode;
+  pov: string;
   autoShowDiff: boolean;
 
   userEnhanceEnabled: boolean;
@@ -24,7 +24,7 @@ export interface HoneSettings {
   userAutoEnhance: boolean;
   /** TODO(auto-enhance): consumed once auto-enhance ships. */
   userEnhanceMode: EnhanceMode;
-  userPov: PovMode;
+  userPov: string;
 
   /** Max tokens of lorebook content in refinement context. 0 = unlimited. */
   maxLorebookTokens: number;
@@ -57,7 +57,6 @@ export interface HoneSettings {
   debugLogFullPayloads: boolean;
 }
 
-export type PovMode = "auto" | "1st" | "1.5" | "2nd" | "3rd";
 export type EnhanceMode = "pre" | "post" | "inplace";
 export type StrategyKind = "pipeline" | "parallel";
 export type MessageRole = "system" | "user" | "assistant";
@@ -181,6 +180,16 @@ export interface ChatStats {
   byStrategy: Record<string, number>;
 }
 
+export interface PovPreset {
+  id: string;
+  name: string;
+  content: string;
+}
+
+export interface PovPresetSummary extends PovPreset {
+  builtIn: boolean;
+}
+
 export type FrontendToBackend =
   | { type: "refine"; messageId: string; chatId: string }
   | { type: "undo"; messageId: string; chatId: string }
@@ -214,6 +223,10 @@ export type FrontendToBackend =
   | { type: "save-model-profile"; profile: ModelProfile }
   | { type: "delete-model-profile"; id: string }
   | { type: "duplicate-model-profile"; id: string }
+  | { type: "list-pov-presets" }
+  | { type: "save-pov-preset"; preset: PovPreset }
+  | { type: "delete-pov-preset"; id: string }
+  | { type: "duplicate-pov-preset"; id: string; slot: PresetSlot }
   | { type: "get-connections" }
   | { type: "refine-last" }
   | { type: "undo-last" }
@@ -246,6 +259,8 @@ export type BackendToFrontend =
   | { type: "preset"; preset: HonePreset }
   | { type: "preset-exported"; id: string; name: string; json: string }
   | { type: "preset-import-result"; success: boolean; id?: string; error?: string }
+  | { type: "pov-presets"; presets: PovPresetSummary[] }
+  | { type: "pov-preset-error"; error: string }
   | {
       type: "preview-result";
       path: PreviewPath;

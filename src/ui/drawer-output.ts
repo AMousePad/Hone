@@ -8,10 +8,10 @@ import type {
 import { createPresetPanel } from "./preset-panel";
 import {
   makeDescription,
-  makeSelectRow,
   makeSubtabBar,
   createContextSettingsPanel,
 } from "./form-helpers";
+import { createPovEditor } from "./pov-editor";
 
 export function createOutputPanel(
   ctx: SpindleFrontendContext,
@@ -30,6 +30,8 @@ export function createOutputPanel(
     modelProfiles,
     onStateChanged: render,
   });
+
+  const povEditor = createPovEditor({ ctx, sendToBackend, slot: "output" });
 
   let activeSubtab = "pipeline";
   const subtabs = makeSubtabBar(
@@ -56,21 +58,7 @@ export function createOutputPanel(
     const s = currentSettings;
 
     root.appendChild(panel.buildBar());
-
-    const povRow = makeSelectRow(
-      "AI Message PoV",
-      "Point of view to enforce for AI messages. Auto-detect instructs the model to match the surrounding text's perspective.",
-      [
-        { value: "auto", label: "Auto-detect" },
-        { value: "1st", label: "First Person" },
-        { value: "1.5", label: "First Person (1.5)" },
-        { value: "2nd", label: "Second Person" },
-        { value: "3rd", label: "Third Person" },
-      ],
-      () => s.pov,
-      (val) => sendUpdate({ pov: val as any })
-    );
-    root.appendChild(povRow);
+    root.appendChild(povEditor.element);
 
     root.appendChild(subtabs.bar);
 
@@ -97,18 +85,19 @@ export function createOutputPanel(
 
   function handleBackendMessage(msg: BackendToFrontend) {
     panel.handleBackendMessage(msg);
+    povEditor.handleBackendMessage(msg);
 
     switch (msg.type) {
       case "settings":
         currentSettings = msg.settings;
         panel.onSettings(msg.settings);
+        povEditor.onSettings(msg.settings);
         break;
       case "model-profiles":
         modelProfiles = msg.profiles;
         panel.setModelProfiles(modelProfiles);
         break;
     }
-    // Parent (drawer.ts) calls renderActivePanel() after delegation.
   }
 
   return {

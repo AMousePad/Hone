@@ -20,9 +20,9 @@ import {
 } from "./text-utils";
 import {
   buildChatHistoryBlock,
-  resolvePovInstruction,
   approxTokens,
 } from "./prompt-builder";
+import { resolvePovContent } from "./pov-presets";
 import { generate, buildGenerationParameters } from "./generation";
 import { getSettings, updateSettings } from "./settings";
 import { getPreset } from "./presets";
@@ -163,9 +163,9 @@ async function buildContext(
     historyBudget
   );
 
-  const pov = resolvePovInstruction(
-    isUserMessage ? settings.userPov : settings.pov,
-    isUserMessage
+  const pov = await resolvePovContent(
+    userId,
+    isUserMessage ? settings.userPov : settings.pov
   );
 
   const userMessage = isUserMessage ? (message.content || "") : "";
@@ -921,7 +921,7 @@ export async function enhanceUserMessage(
       historyBudget
     );
 
-    const pov = resolvePovInstruction(settings.userPov, true);
+    const pov = await resolvePovContent(userId, settings.userPov);
 
     const lore = await fetchLoreBlock(chatId, userId, settings.maxLorebookTokens);
 
@@ -999,9 +999,9 @@ export async function previewStage(
       const historyBudget = Math.max(0, totalBudget - approxTokens(latest));
       context = buildChatHistoryBlock(messages, messages.length - 1, latestId, historyBudget);
 
-      pov = resolvePovInstruction(
-        slot === "input" ? settings.userPov : settings.pov,
-        slot === "input"
+      pov = await resolvePovContent(
+        userId,
+        slot === "input" ? settings.userPov : settings.pov
       );
 
       const chat = await getChat(chatId, userId);
