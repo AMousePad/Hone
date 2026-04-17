@@ -1219,6 +1219,38 @@ var STYLES = `
   border-top: 1px solid var(--lumiverse-border);
 }
 
+.hone-pov-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.hone-pov-editor__bar {
+  margin-bottom: 0;
+}
+.hone-pov-editor__textarea {
+  width: 100%;
+  min-height: 84px;
+  padding: 8px 10px;
+  border: 1px solid var(--lumiverse-border);
+  border-radius: var(--lumiverse-radius, 4px);
+  background: var(--lumiverse-fill, transparent);
+  color: var(--lumiverse-text);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  resize: vertical;
+  box-sizing: border-box;
+}
+.hone-pov-editor__textarea:focus {
+  border-color: var(--lumiverse-primary);
+  outline: none;
+}
+.hone-pov-editor__textarea[readonly] {
+  opacity: 0.75;
+  cursor: default;
+}
+
 .hone-readonly-toast {
   position: fixed;
   top: 20px;
@@ -4057,6 +4089,171 @@ function createPresetPanel(opts) {
   };
 }
 
+// src/ui/pov-editor.ts
+function createPovEditor(opts) {
+  const { ctx, sendToBackend, slot } = opts;
+  const settingsKey = slot === "input" ? "userPov" : "pov";
+  const label = slot === "input" ? "User Message PoV" : "AI Message PoV";
+  const tooltip = slot === "input" ? "Point-of-view for your messages. Presets are shared with AI Message PoV; only the selection differs." : "Point-of-view for AI messages. Presets are shared with User Message PoV; only the selection differs.";
+  const root = document.createElement("div");
+  root.className = "hone-pov-editor";
+  let settings = null;
+  let presets = null;
+  function isTextareaFocused() {
+    const active = document.activeElement;
+    return active instanceof HTMLTextAreaElement && root.contains(active);
+  }
+  function render() {
+    if (isTextareaFocused())
+      return;
+    if (!settings || !presets) {
+      root.replaceChildren(makeLoading());
+      return;
+    }
+    const activeId = settings[settingsKey];
+    const active = presets.find((p) => p.id === activeId) ?? presets[0];
+    if (!active) {
+      root.replaceChildren(makeLoading());
+      return;
+    }
+    const textarea = renderTextarea(active);
+    root.replaceChildren(renderBar(active, textarea), textarea);
+  }
+  function renderBar(active, textarea) {
+    const bar = document.createElement("div");
+    bar.className = "hone-preset-bar hone-preset-bar--stacked hone-pov-editor__bar";
+    const labelEl = document.createElement("label");
+    labelEl.className = "hone-preset-bar__label";
+    labelEl.textContent = `${label}:`;
+    labelEl.title = tooltip;
+    bar.appendChild(labelEl);
+    bar.appendChild(renderSelect(active));
+    bar.appendChild(renderActions(active, textarea));
+    return bar;
+  }
+  function renderSelect(active) {
+    const select = document.createElement("select");
+    select.className = "hone-preset-bar__select";
+    const list = presets ?? [];
+    const customs = list.filter((p) => !p.builtIn);
+    const builtIns = list.filter((p) => p.builtIn);
+    for (const p of customs)
+      select.appendChild(makeOption(p, active.id));
+    if (builtIns.length > 0) {
+      const group = document.createElement("optgroup");
+      group.label = "Built-in";
+      for (const p of builtIns)
+        group.appendChild(makeOption(p, active.id));
+      select.appendChild(group);
+    }
+    select.addEventListener("change", () => {
+      if (select.value === active.id)
+        return;
+      sendToBackend({
+        type: "update-settings",
+        settings: { [settingsKey]: select.value }
+      });
+    });
+    return select;
+  }
+  function makeOption(preset, activeId) {
+    const opt = document.createElement("option");
+    opt.value = preset.id;
+    opt.textContent = preset.name;
+    opt.selected = preset.id === activeId;
+    return opt;
+  }
+  function renderActions(active, textarea) {
+    const actions = document.createElement("div");
+    actions.className = "hone-preset-bar__actions";
+    if (!active.builtIn) {
+      actions.appendChild(makeBtn("Rename", "Rename this POV preset.", () => {
+        const input = window.prompt("Rename POV preset:", active.name);
+        if (!input)
+          return;
+        const trimmed = input.trim();
+        if (!trimmed || trimmed === active.name)
+          return;
+        sendToBackend({
+          type: "save-pov-preset",
+          preset: { id: active.id, name: trimmed, content: textarea.value }
+        });
+      }));
+    }
+    actions.appendChild(makeBtn("Duplicate", active.builtIn ? "Create an editable copy of this built-in POV preset." : "Create an editable copy of this POV preset.", () => sendToBackend({ type: "duplicate-pov-preset", id: active.id, slot })));
+    if (!active.builtIn) {
+      const del = makeBtn("Delete", "Delete this POV preset.", () => {
+        const { id, name } = active;
+        ctx.ui.showConfirm({
+          title: "Delete POV preset",
+          message: `Delete "${name}"? This cannot be undone.`,
+          confirmLabel: "Delete",
+          cancelLabel: "Cancel",
+          variant: "danger"
+        }).then((result) => {
+          if (result.confirmed) {
+            sendToBackend({ type: "delete-pov-preset", id });
+          }
+        }).catch(() => {});
+      });
+      del.classList.add("hone-settings-btn--danger");
+      actions.appendChild(del);
+    }
+    return actions;
+  }
+  function renderTextarea(active) {
+    const textarea = document.createElement("textarea");
+    textarea.className = "hone-pov-editor__textarea";
+    textarea.spellcheck = false;
+    textarea.value = active.content;
+    textarea.readOnly = active.builtIn;
+    textarea.placeholder = "POV instruction sent to the model...";
+    textarea.title = active.builtIn ? "Built-in POV presets are read-only. Duplicate to edit." : "Edits save when you click away.";
+    textarea.addEventListener("change", () => {
+      const current = presets?.find((p) => p.id === active.id);
+      if (!current || current.builtIn)
+        return;
+      if (textarea.value === current.content)
+        return;
+      sendToBackend({
+        type: "save-pov-preset",
+        preset: { id: current.id, name: current.name, content: textarea.value }
+      });
+    });
+    return textarea;
+  }
+  function makeLoading() {
+    const p = document.createElement("p");
+    p.className = "hone-section-description";
+    p.textContent = "Loading POV presets...";
+    return p;
+  }
+  function makeBtn(text, title, onClick) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "hone-settings-btn";
+    btn.textContent = text;
+    btn.title = title;
+    btn.addEventListener("click", onClick);
+    return btn;
+  }
+  function handleBackendMessage(msg) {
+    if (msg.type === "pov-presets") {
+      presets = msg.presets;
+      render();
+    }
+  }
+  function onSettings(next) {
+    settings = next;
+    render();
+  }
+  return {
+    element: root,
+    handleBackendMessage,
+    onSettings
+  };
+}
+
 // src/ui/drawer-output.ts
 function createOutputPanel(ctx, sendToBackend, root) {
   let currentSettings = null;
@@ -4069,6 +4266,7 @@ function createOutputPanel(ctx, sendToBackend, root) {
     modelProfiles,
     onStateChanged: render
   });
+  const povEditor = createPovEditor({ ctx, sendToBackend, slot: "output" });
   let activeSubtab = "pipeline";
   const subtabs = makeSubtabBar([
     { id: "pipeline", label: "Pipeline" },
@@ -4090,14 +4288,7 @@ function createOutputPanel(ctx, sendToBackend, root) {
     }
     const s = currentSettings;
     root.appendChild(panel.buildBar());
-    const povRow = makeSelectRow("AI Message PoV", "Point of view to enforce for AI messages. Auto-detect instructs the model to match the surrounding text's perspective.", [
-      { value: "auto", label: "Auto-detect" },
-      { value: "1st", label: "First Person" },
-      { value: "1.5", label: "First Person (1.5)" },
-      { value: "2nd", label: "Second Person" },
-      { value: "3rd", label: "Third Person" }
-    ], () => s.pov, (val) => sendUpdate({ pov: val }));
-    root.appendChild(povRow);
+    root.appendChild(povEditor.element);
     root.appendChild(subtabs.bar);
     const content = document.createElement("div");
     content.className = "hone-subtab-content";
@@ -4119,10 +4310,12 @@ function createOutputPanel(ctx, sendToBackend, root) {
   }
   function handleBackendMessage(msg) {
     panel.handleBackendMessage(msg);
+    povEditor.handleBackendMessage(msg);
     switch (msg.type) {
       case "settings":
         currentSettings = msg.settings;
         panel.onSettings(msg.settings);
+        povEditor.onSettings(msg.settings);
         break;
       case "model-profiles":
         modelProfiles = msg.profiles;
@@ -4148,6 +4341,7 @@ function createInputPanel(ctx, sendToBackend, root) {
     modelProfiles,
     onStateChanged: render
   });
+  const povEditor = createPovEditor({ ctx, sendToBackend, slot: "input" });
   let activeSubtab = "pipeline";
   const subtabs = makeSubtabBar([
     { id: "pipeline", label: "Pipeline" },
@@ -4168,12 +4362,7 @@ function createInputPanel(ctx, sendToBackend, root) {
     }
     const s = currentSettings;
     root.appendChild(panel.buildBar());
-    root.appendChild(makeSelectRow("User Message PoV", "Point of view to enforce for your messages.", [
-      { value: "auto", label: "Auto-detect" },
-      { value: "1st", label: "First Person" },
-      { value: "2nd", label: "Second Person" },
-      { value: "3rd", label: "Third Person" }
-    ], () => s.userPov, (val) => sendUpdate({ userPov: val })));
+    root.appendChild(povEditor.element);
     root.appendChild(subtabs.bar);
     const content = document.createElement("div");
     content.className = "hone-subtab-content";
@@ -4192,10 +4381,12 @@ function createInputPanel(ctx, sendToBackend, root) {
   }
   function handleBackendMessage(msg) {
     panel.handleBackendMessage(msg);
+    povEditor.handleBackendMessage(msg);
     switch (msg.type) {
       case "settings":
         currentSettings = msg.settings;
         panel.onSettings(msg.settings);
+        povEditor.onSettings(msg.settings);
         break;
       case "model-profiles":
         modelProfiles = msg.profiles;
@@ -6202,6 +6393,17 @@ function setup(ctx) {
           }).catch(() => {});
         }
         break;
+      case "pov-preset-error":
+        if (msg.error) {
+          ctx.ui.showConfirm({
+            title: "POV preset error",
+            message: msg.error,
+            confirmLabel: "OK",
+            cancelLabel: "Dismiss",
+            variant: "danger"
+          }).catch(() => {});
+        }
+        break;
     }
   });
   cleanups.push(msgUnsub);
@@ -6210,6 +6412,7 @@ function setup(ctx) {
     sendToBackend({ type: "list-presets" });
     sendToBackend({ type: "get-connections" });
     sendToBackend({ type: "list-model-profiles" });
+    sendToBackend({ type: "list-pov-presets" });
     sendToBackend({ type: "get-active-chat" });
   }
   sendInitialHandshake();

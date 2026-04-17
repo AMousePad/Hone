@@ -911,9 +911,9 @@ FIX: Cut model-motivated stalling. Replace with forward action consistent with t
         {
           id: "rule-pov",
           name: "POV Pronoun Enforcement",
-          content: `- POV Pronoun Enforcement: The built-in POV rules (provided in context above) handle basic pronoun mapping. This rule covers what the built-in system misses.
+          content: `- POV Pronoun Enforcement: The POV instruction provided above establishes the pronoun conventions for this session. This rule enforces that instruction and covers drift it doesn't already catch.
 
-1. THE 1.5TH-PERSON TRAP: The most common error in Simulacra \u2014 the user character referred to as "he/him/his" or "she/her" instead of "you/your" in narration and description. Every instance where the user character is described in third person (outside of another character's dialogue) is a violation. Fix every instance.
+1. PRONOUN MAPPING VIOLATIONS: Re-read the POV instruction above. Every sentence in narration or description (outside of another character's dialogue) that uses a pronoun pattern inconsistent with that instruction is a violation. Fix every instance. Common failure: the model falls back to its own defaults \u2014 first-person "I/me" narration, or second-person "you/your" for the user character \u2014 when the configured POV specifies something else. Match the configured POV exactly, even when the original draft drifts.
 
 2. KNOWLEDGE BOUNDARIES: Does the POV character reference events they couldn't have witnessed, or know another character's private thoughts without being told? Impossible knowledge is a POV violation \u2014 remove or reframe as inference/speculation.
 
@@ -1369,9 +1369,9 @@ FIX: Cut model-motivated stalling. Replace with forward action consistent with t
         {
           id: "rule-pov",
           name: "POV Pronoun Enforcement",
-          content: `- POV Pronoun Enforcement: The built-in POV rules (provided in context above) handle basic pronoun mapping. This rule covers what the built-in system misses.
+          content: `- POV Pronoun Enforcement: The POV instruction provided above establishes the pronoun conventions for this session. This rule enforces that instruction and covers drift it doesn't already catch.
 
-1. THE 1.5TH-PERSON TRAP: The most common error in Simulacra \u2014 the user character referred to as "he/him/his" or "she/her" instead of "you/your" in narration and description. Every instance where the user character is described in third person (outside of another character's dialogue) is a violation. Fix every instance.
+1. PRONOUN MAPPING VIOLATIONS: Re-read the POV instruction above. Every sentence in narration or description (outside of another character's dialogue) that uses a pronoun pattern inconsistent with that instruction is a violation. Fix every instance. Common failure: the model falls back to its own defaults \u2014 first-person "I/me" narration, or second-person "you/your" for the user character \u2014 when the configured POV specifies something else. Match the configured POV exactly, even when the original draft drifts.
 
 2. KNOWLEDGE BOUNDARIES: Does the POV character reference events they couldn't have witnessed, or know another character's private thoughts without being told? Impossible knowledge is a POV violation \u2014 remove or reframe as inference/speculation.
 
@@ -1833,9 +1833,9 @@ FIX: Cut model-motivated stalling. Replace with forward action consistent with t
         {
           id: "rule-pov",
           name: "POV Pronoun Enforcement",
-          content: `- POV Pronoun Enforcement: The built-in POV rules (provided in context above) handle basic pronoun mapping. This rule covers what the built-in system misses.
+          content: `- POV Pronoun Enforcement: The POV instruction provided above establishes the pronoun conventions for this session. This rule enforces that instruction and covers drift it doesn't already catch.
 
-1. THE 1.5TH-PERSON TRAP: The most common error in Simulacra \u2014 the user character referred to as "he/him/his" or "she/her" instead of "you/your" in narration and description. Every instance where the user character is described in third person (outside of another character's dialogue) is a violation. Fix every instance.
+1. PRONOUN MAPPING VIOLATIONS: Re-read the POV instruction above. Every sentence in narration or description (outside of another character's dialogue) that uses a pronoun pattern inconsistent with that instruction is a violation. Fix every instance. Common failure: the model falls back to its own defaults \u2014 first-person "I/me" narration, or second-person "you/your" for the user character \u2014 when the configured POV specifies something else. Match the configured POV exactly, even when the original draft drifts.
 
 2. KNOWLEDGE BOUNDARIES: Does the POV character reference events they couldn't have witnessed, or know another character's private thoughts without being told? Impossible knowledge is a POV violation \u2014 remove or reframe as inference/speculation.
 
@@ -2699,9 +2699,9 @@ EXCEPTION: Exact-word repetition within a single sentence or clause for delibera
         {
           id: "rule-pov",
           name: "POV Pronoun Enforcement",
-          content: `- POV Pronoun Enforcement: The built-in POV rules (provided in context above) handle basic pronoun mapping. This rule covers what the built-in system misses.
+          content: `- POV Pronoun Enforcement: The POV instruction provided above establishes the pronoun conventions for this session. This rule enforces that instruction and covers drift it doesn't already catch.
 
-1. THE 1.5TH-PERSON TRAP: The most common error in Simulacra \u2014 the user character referred to as "he/him/his" or "she/her" instead of "you/your" in narration and description. Every instance where the user character is described in third person (outside of another character's dialogue) is a violation. Fix every instance.
+1. PRONOUN MAPPING VIOLATIONS: Re-read the POV instruction above. Every sentence in narration or description (outside of another character's dialogue) that uses a pronoun pattern inconsistent with that instruction is a violation. Fix every instance. Common failure: the model falls back to its own defaults \u2014 first-person "I/me" narration, or second-person "you/your" for the user character \u2014 when the configured POV specifies something else. Match the configured POV exactly, even when the original draft drifts.
 
 2. KNOWLEDGE BOUNDARIES: Does the POV character reference events they couldn't have witnessed, or know another character's private thoughts without being told? Impossible knowledge is a POV violation \u2014 remove or reframe as inference/speculation.
 
@@ -3056,9 +3056,9 @@ EXCEPTION: Exact-word repetition within a single sentence or clause for delibera
         {
           id: "rule-pov",
           name: "POV Pronoun Enforcement",
-          content: `- POV Pronoun Enforcement: The built-in POV rules (provided in context above) handle basic pronoun mapping. This rule covers what the built-in system misses.
+          content: `- POV Pronoun Enforcement: The POV instruction provided above establishes the pronoun conventions for this session. This rule enforces that instruction and covers drift it doesn't already catch.
 
-1. THE 1.5TH-PERSON TRAP: The most common error in Simulacra \u2014 the user character referred to as "he/him/his" or "she/her" instead of "you/your" in narration and description. Every instance where the user character is described in third person (outside of another character's dialogue) is a violation. Fix every instance.
+1. PRONOUN MAPPING VIOLATIONS: Re-read the POV instruction above. Every sentence in narration or description (outside of another character's dialogue) that uses a pronoun pattern inconsistent with that instruction is a violation. Fix every instance. Common failure: the model falls back to its own defaults \u2014 first-person "I/me" narration, or second-person "you/your" for the user character \u2014 when the configured POV specifies something else. Match the configured POV exactly, even when the original draft drifts.
 
 2. KNOWLEDGE BOUNDARIES: Does the POV character reference events they couldn't have witnessed, or know another character's private thoughts without being told? Impossible knowledge is a POV violation \u2014 remove or reframe as inference/speculation.
 
@@ -3884,35 +3884,6 @@ init_preset_defaults();
 var DEFAULT_PROFILE_ID = "__default__";
 var HEAD_COLLECTION_ID = "__head__";
 
-// src/defaults.ts
-var DEFAULT_SETTINGS = {
-  enabled: true,
-  autoRefine: false,
-  activeModelProfileId: DEFAULT_PROFILE_ID,
-  currentPresetId: DEFAULT_ACTIVE_PRESET_ID,
-  currentInputPresetId: DEFAULT_INPUT_ACTIVE_PRESET_ID,
-  pov: "auto",
-  autoShowDiff: true,
-  userEnhanceEnabled: true,
-  userAutoEnhance: false,
-  userEnhanceMode: "post",
-  userPov: "1st",
-  maxLorebookTokens: 50000,
-  maxMessageContextTokens: 4000,
-  generationTimeoutSecs: 120,
-  minCharThreshold: 20,
-  batchIntervalMs: 2000,
-  notificationSoundEnabled: false,
-  notificationSoundUrl: "",
-  floatWidgetConfirm: false,
-  floatWidgetHidden: false,
-  floatWidgetSize: 124,
-  floatWidgetLumiaMode: true,
-  debugLogging: false,
-  debugLogMaxEntries: 2000,
-  debugLogFullPayloads: false
-};
-
 // src/hlog.ts
 var DEFAULT_MAX_ENTRIES = 2000;
 var MIN_MAX_ENTRIES = 100;
@@ -4016,6 +3987,198 @@ function bufferStats(userId) {
     enabled: debugEnabledCache.get(userId) === true
   };
 }
+
+// src/pov-presets.ts
+var POV_PREFIX = "pov-presets/";
+function povPath(id) {
+  return `${POV_PREFIX}${id}.json`;
+}
+function slugifyId(input) {
+  const base = input.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return base || "pov";
+}
+var SAFE_CUSTOM_ID = /^[a-z0-9][a-z0-9._-]{0,127}$/;
+function assertSafeCustomId(id) {
+  if (!SAFE_CUSTOM_ID.test(id)) {
+    throw new Error(`Invalid POV preset id "${id}"`);
+  }
+}
+var BUILTIN_POV_PRESETS = [
+  {
+    id: "auto",
+    name: "Auto-detect",
+    content: "Point-of-view: Match the point-of-view, tense, and pronoun conventions already established in the surrounding text. Do not shift perspective."
+  },
+  {
+    id: "1st",
+    name: "First Person",
+    content: "Point-of-view: First person. The POV character uses I/me/my in narration. The addressed character uses you/your. Other characters use he/she/they."
+  },
+  {
+    id: "1.5",
+    name: "First Person (1.5)",
+    content: "Point-of-view: First person with direct address. The POV character uses I/me/my. The addressed character is referred to as you/your in narration and description (not he/she). Other characters use he/she/they."
+  },
+  {
+    id: "2nd",
+    name: "Second Person",
+    content: "Point-of-view: Second person. The addressed character uses you/your in narration. All other characters use he/she/they/proper names."
+  },
+  {
+    id: "3rd",
+    name: "Third Person",
+    content: "Point-of-view: Third person. All characters use he/she/they/proper names. No I/you in narration."
+  }
+];
+var DEFAULT_POV_PRESET_ID = "auto";
+var DEFAULT_USER_POV_PRESET_ID = "1st";
+var BUILTIN_IDS = new Set(BUILTIN_POV_PRESETS.map((p) => p.id));
+function isBuiltInPovPresetId(id) {
+  return BUILTIN_IDS.has(id);
+}
+function getBuiltInPovPreset(id) {
+  return BUILTIN_POV_PRESETS.find((p) => p.id === id) ?? null;
+}
+async function listCustomIds(userId) {
+  try {
+    const files = await spindle.userStorage.list(POV_PREFIX, userId);
+    return files.map((f) => f.replace(/\\/g, "/")).filter((f) => /^[^/]+\.json$/.test(f)).map((f) => f.replace(/\.json$/, ""));
+  } catch {
+    return [];
+  }
+}
+async function uniqueId(userId, base) {
+  const slug = slugifyId(base);
+  const custom = new Set(await listCustomIds(userId));
+  const taken = (id) => custom.has(id) || BUILTIN_IDS.has(id);
+  if (!taken(slug))
+    return slug;
+  for (let i = 2;i < 1e4; i++) {
+    const candidate = `${slug}-${i}`;
+    if (!taken(candidate))
+      return candidate;
+  }
+  return `${slug}-${Date.now().toString(36)}`;
+}
+function isPovPresetShape(value) {
+  if (!value || typeof value !== "object")
+    return false;
+  const v = value;
+  return typeof v.id === "string" && typeof v.name === "string" && typeof v.content === "string";
+}
+async function loadCustom(userId, id) {
+  if (!SAFE_CUSTOM_ID.test(id))
+    return null;
+  try {
+    const raw = await spindle.userStorage.getJson(povPath(id), {
+      fallback: null,
+      userId
+    });
+    if (!isPovPresetShape(raw))
+      return null;
+    return { id, name: raw.name, content: raw.content };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    debug(userId, `loadCustomPov: failed to load "${id}": ${msg}`);
+    return null;
+  }
+}
+async function listPovPresets(userId) {
+  debug(userId, `listPovPresets: start`);
+  const ids = await listCustomIds(userId);
+  const customs = [];
+  for (const id of ids) {
+    const preset = await loadCustom(userId, id);
+    if (preset) {
+      customs.push({ id: preset.id, name: preset.name, content: preset.content, builtIn: false });
+    }
+  }
+  customs.sort((a, b) => a.name.localeCompare(b.name));
+  const builtIns = BUILTIN_POV_PRESETS.map((p) => ({
+    id: p.id,
+    name: p.name,
+    content: p.content,
+    builtIn: true
+  }));
+  debug(userId, `listPovPresets: ${customs.length} custom + ${builtIns.length} built-in`);
+  return [...customs, ...builtIns];
+}
+async function getPovPreset(userId, id) {
+  const builtIn = getBuiltInPovPreset(id);
+  if (builtIn)
+    return builtIn;
+  return loadCustom(userId, id);
+}
+async function savePovPreset(userId, preset) {
+  if (isBuiltInPovPresetId(preset.id)) {
+    throw new Error(`Cannot overwrite built-in POV preset "${preset.id}"; duplicate it first.`);
+  }
+  assertSafeCustomId(preset.id);
+  const clean = {
+    id: preset.id,
+    name: preset.name.trim() || preset.id,
+    content: preset.content
+  };
+  debug(userId, `savePovPreset: id="${clean.id}" name="${clean.name}" contentLen=${clean.content.length}`);
+  await spindle.userStorage.setJson(povPath(clean.id), clean, { userId });
+}
+async function deletePovPreset(userId, id) {
+  if (isBuiltInPovPresetId(id)) {
+    throw new Error(`Cannot delete built-in POV preset "${id}".`);
+  }
+  assertSafeCustomId(id);
+  debug(userId, `deletePovPreset: id="${id}"`);
+  await spindle.userStorage.delete(povPath(id), userId);
+}
+async function duplicatePovPreset(userId, sourceId) {
+  const source = await getPovPreset(userId, sourceId);
+  if (!source) {
+    throw new Error(`POV preset "${sourceId}" not found`);
+  }
+  const newName = `${source.name} (Copy)`;
+  const newId = await uniqueId(userId, newName);
+  const copy = { id: newId, name: newName, content: source.content };
+  await savePovPreset(userId, copy);
+  debug(userId, `duplicatePovPreset: "${source.name}" (${sourceId}) -> "${newName}" (${newId})`);
+  return copy;
+}
+async function resolvePovContent(userId, id) {
+  const preset = await getPovPreset(userId, id);
+  if (preset)
+    return preset.content;
+  const fallback = getBuiltInPovPreset(DEFAULT_POV_PRESET_ID);
+  debug(userId, `resolvePovContent: id="${id}" not found; falling back to "${DEFAULT_POV_PRESET_ID}"`);
+  return fallback?.content ?? "";
+}
+
+// src/defaults.ts
+var DEFAULT_SETTINGS = {
+  enabled: true,
+  autoRefine: false,
+  activeModelProfileId: DEFAULT_PROFILE_ID,
+  currentPresetId: DEFAULT_ACTIVE_PRESET_ID,
+  currentInputPresetId: DEFAULT_INPUT_ACTIVE_PRESET_ID,
+  pov: DEFAULT_POV_PRESET_ID,
+  autoShowDiff: true,
+  userEnhanceEnabled: true,
+  userAutoEnhance: false,
+  userEnhanceMode: "post",
+  userPov: DEFAULT_USER_POV_PRESET_ID,
+  maxLorebookTokens: 50000,
+  maxMessageContextTokens: 4000,
+  generationTimeoutSecs: 120,
+  minCharThreshold: 20,
+  batchIntervalMs: 2000,
+  notificationSoundEnabled: false,
+  notificationSoundUrl: "",
+  floatWidgetConfirm: false,
+  floatWidgetHidden: false,
+  floatWidgetSize: 124,
+  floatWidgetLumiaMode: true,
+  debugLogging: false,
+  debugLogMaxEntries: 2000,
+  debugLogFullPayloads: false
+};
 
 // src/settings.ts
 var SETTINGS_FILE = "settings.json";
@@ -4308,24 +4471,6 @@ function extractRefinedContent(raw) {
 }
 
 // src/prompt-builder.ts
-var AUTO_INSTRUCTION = "Point-of-view: Match the point-of-view, tense, and pronoun conventions already established in the surrounding text. Do not shift perspective.";
-var POV_INSTRUCTIONS = {
-  "1st": "Point-of-view: First person. I/me/my = the narrator character. You/your = the player character. Other characters use he/she/they.",
-  "1.5": "Point-of-view: First person (1.5). I/me/my = the current POV character. You/your = the player (always used in descriptions). Other characters use he/she/they.",
-  "2nd": "Point-of-view: Second person. You/your = the player character in narration. AI characters use he/she/they.",
-  "3rd": "Point-of-view: Third person. All characters use he/she/they/proper names. No I/you in narration."
-};
-var USER_POV_INSTRUCTIONS = {
-  "1st": "Point-of-view: First person. I/me/my = the user's character. Other characters use he/she/they.",
-  "2nd": "Point-of-view: Second person. You/your = the user's character. Other characters use he/she/they.",
-  "3rd": "Point-of-view: Third person. All characters use he/she/they/proper names."
-};
-function resolvePovInstruction(pov, isUserMessage) {
-  if (pov === "auto")
-    return AUTO_INSTRUCTION;
-  const table = isUserMessage ? USER_POV_INSTRUCTIONS : POV_INSTRUCTIONS;
-  return table[pov] || "";
-}
 function buildChatHistoryBlock(messages, upToIndex, excludeId, tokenBudget) {
   if (tokenBudget <= 0)
     return "";
@@ -4458,16 +4603,16 @@ var PRESETS_PREFIX = "presets/";
 function presetPath(id) {
   return `${PRESETS_PREFIX}${id}.json`;
 }
-function slugifyId(input) {
+function slugifyId2(input) {
   const base = input.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   return base || "preset";
 }
-async function uniqueId(userId, base) {
-  const slug = slugifyId(base);
+async function uniqueId2(userId, base) {
+  const slug = slugifyId2(base);
   const existing = new Set;
   for (const bp of BUILTIN_PRESETS)
     existing.add(bp.id);
-  const customIds = await listCustomIds(userId);
+  const customIds = await listCustomIds2(userId);
   for (const id of customIds)
     existing.add(id);
   if (!existing.has(slug))
@@ -4477,7 +4622,7 @@ async function uniqueId(userId, base) {
     i++;
   return `${slug}-${i}`;
 }
-async function listCustomIds(userId) {
+async function listCustomIds2(userId) {
   try {
     const files = await spindle.userStorage.list(PRESETS_PREFIX, userId);
     return files.map((f) => f.replace(/\\/g, "/")).filter((f) => /^[^/]+\.json$/.test(f)).map((f) => f.replace(/\.json$/, ""));
@@ -4494,7 +4639,7 @@ async function listPresets(userId) {
     strategy: p.strategy,
     slot: p.slot
   }));
-  const customIds = await listCustomIds(userId);
+  const customIds = await listCustomIds2(userId);
   debug(userId, `listPresets: ${BUILTIN_PRESETS.length} built-in, ${customIds.length} custom on disk`);
   const customs = [];
   for (const id of customIds) {
@@ -4572,7 +4717,7 @@ async function duplicatePreset(userId, id) {
     throw new Error(`Preset "${id}" not found`);
   }
   const newName = `${source.name} (Copy)`;
-  const newId = await uniqueId(userId, newName);
+  const newId = await uniqueId2(userId, newName);
   const copy = {
     ...deepCloneJson(source),
     id: newId,
@@ -4638,7 +4783,7 @@ async function importPreset(userId, json, targetSlot) {
   debug(userId, `importPreset: validating preset name="${blob.preset.name || "?"}" strategy="${blob.preset.strategy || "?"}"`);
   const withSlot = { ...blob.preset, slot: targetSlot };
   const validated = normalizePreset(withSlot);
-  const newId = await uniqueId(userId, validated.name || validated.id);
+  const newId = await uniqueId2(userId, validated.name || validated.id);
   const toSave = stripStageModelProfiles({ ...validated, id: newId, builtIn: false, slot: targetSlot });
   await savePreset(userId, toSave);
   debug(userId, `importPreset: saved as "${toSave.name}" (id="${newId}") slot=${targetSlot}`);
@@ -4815,11 +4960,11 @@ var PROFILES_PREFIX = "model-profiles/";
 function profilePath(id) {
   return `${PROFILES_PREFIX}${id}.json`;
 }
-function slugifyId2(input) {
+function slugifyId3(input) {
   const base = input.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   return base || "profile";
 }
-async function listCustomIds2(userId) {
+async function listCustomIds3(userId) {
   try {
     const keys = await spindle.userStorage.list(PROFILES_PREFIX, userId);
     return keys.filter((k) => k.endsWith(".json")).map((k) => k.replace(PROFILES_PREFIX, "").replace(/\.json$/, ""));
@@ -4827,9 +4972,9 @@ async function listCustomIds2(userId) {
     return [];
   }
 }
-async function uniqueId2(userId, base) {
-  const slug = slugifyId2(base);
-  const existing = new Set(await listCustomIds2(userId));
+async function uniqueId3(userId, base) {
+  const slug = slugifyId3(base);
+  const existing = new Set(await listCustomIds3(userId));
   if (!existing.has(slug))
     return slug;
   for (let i = 2;i < 1000; i++) {
@@ -4865,7 +5010,7 @@ function createDefaultProfile(connectionProfileId, name) {
 }
 async function listModelProfiles(userId) {
   debug(userId, `listModelProfiles: start`);
-  const ids = await listCustomIds2(userId);
+  const ids = await listCustomIds3(userId);
   const summaries = [];
   for (const id of ids) {
     try {
@@ -4919,7 +5064,7 @@ async function deleteModelProfile(userId, id) {
   }
 }
 async function createModelProfile(userId, connectionProfileId, name) {
-  const id = await uniqueId2(userId, name);
+  const id = await uniqueId3(userId, name);
   const profile = {
     id,
     ...createDefaultProfile(connectionProfileId, name)
@@ -4935,7 +5080,7 @@ async function duplicateModelProfile(userId, sourceId) {
     return null;
   }
   const newName = `${source.name} (Copy)`;
-  const newId = await uniqueId2(userId, newName);
+  const newId = await uniqueId3(userId, newName);
   const duplicate = {
     id: newId,
     name: newName,
@@ -5371,7 +5516,7 @@ async function buildContext(chatId, messageId, userId, settings) {
   const totalBudget = settings.maxMessageContextTokens > 0 ? settings.maxMessageContextTokens : DEFAULT_MESSAGE_CONTEXT_TOKENS;
   const historyBudget = Math.max(0, totalBudget - approxTokens(latest));
   const history = buildChatHistoryBlock(messages, messages.length - 1, latestId, historyBudget);
-  const pov = resolvePovInstruction(isUserMessage ? settings.userPov : settings.pov, isUserMessage);
+  const pov = await resolvePovContent(userId, isUserMessage ? settings.userPov : settings.pov);
   const userMessage = isUserMessage ? message.content || "" : "";
   const lore = await fetchLoreBlock(chatId, userId, settings.maxLorebookTokens);
   debug(userId, `buildContext: msg=${messageId.slice(0, 8)} role=${message.role} latestLen=${latest.length} historyBudget=${historyBudget}tok historyLen=${history.length} povLen=${pov.length} userMessageLen=${userMessage.length} lore=${lore.activated}/${lore.fetched}`);
@@ -5811,7 +5956,7 @@ async function enhanceUserMessage(text, chatId, userId, mode, send) {
     const totalBudget = settings.maxMessageContextTokens > 0 ? settings.maxMessageContextTokens : DEFAULT_MESSAGE_CONTEXT_TOKENS;
     const historyBudget = Math.max(0, totalBudget - approxTokens(latest));
     const history = buildChatHistoryBlock(messages, messages.length - 1, latestId, historyBudget);
-    const pov = resolvePovInstruction(settings.userPov, true);
+    const pov = await resolvePovContent(userId, settings.userPov);
     const lore = await fetchLoreBlock(chatId, userId, settings.maxLorebookTokens);
     debug(userId, `enhanceUserMessage: draftLen=${text.length} latestLen=${latest.length} historyLen=${history.length} povLen=${pov.length} loreLen=${lore.block.length}`);
     const outcome = await runStrategy({
@@ -5856,7 +6001,7 @@ async function previewStage(preset, stage, stageIndex, totalStages, userId, prop
       const totalBudget = settings.maxMessageContextTokens > 0 ? settings.maxMessageContextTokens : DEFAULT_MESSAGE_CONTEXT_TOKENS;
       const historyBudget = Math.max(0, totalBudget - approxTokens(latest));
       context = buildChatHistoryBlock(messages, messages.length - 1, latestId, historyBudget);
-      pov = resolvePovInstruction(slot === "input" ? settings.userPov : settings.pov, slot === "input");
+      pov = await resolvePovContent(userId, slot === "input" ? settings.userPov : settings.pov);
       const chat = await getChat(chatId, userId);
       characterId = chat?.character_id || undefined;
       resolveChatId = chatId;
@@ -6523,6 +6668,70 @@ spindle.onFrontendMessage(async (raw, userId) => {
           send({ type: "model-profiles", profiles: await listModelProfiles(userId) });
         } else {
           debug(userId, `ipc duplicate-model-profile: source "${msg.id}" not found`);
+        }
+        break;
+      }
+      case "list-pov-presets": {
+        debug(userId, `ipc in: list-pov-presets`);
+        const presets = await listPovPresets(userId);
+        send({ type: "pov-presets", presets });
+        break;
+      }
+      case "save-pov-preset": {
+        debug(userId, `ipc in: save-pov-preset id="${msg.preset.id}"`);
+        try {
+          if (isBuiltInPovPresetId(msg.preset.id)) {
+            throw new Error(`Cannot save over built-in POV preset "${msg.preset.id}"; duplicate it first.`);
+          }
+          await savePovPreset(userId, msg.preset);
+          send({ type: "pov-presets", presets: await listPovPresets(userId) });
+        } catch (err) {
+          const error = err instanceof Error ? err.message : String(err);
+          spindle.log.warn(`[Hone] save-pov-preset failed: ${error}`);
+          send({ type: "pov-presets", presets: await listPovPresets(userId) });
+          send({ type: "pov-preset-error", error: `Failed to save POV preset: ${error}` });
+        }
+        break;
+      }
+      case "delete-pov-preset": {
+        debug(userId, `ipc in: delete-pov-preset id="${msg.id}"`);
+        try {
+          if (isBuiltInPovPresetId(msg.id)) {
+            throw new Error(`Cannot delete built-in POV preset "${msg.id}".`);
+          }
+          await deletePovPreset(userId, msg.id);
+          const settings = await getSettings(userId);
+          const patch = {};
+          if (settings.pov === msg.id)
+            patch.pov = DEFAULT_POV_PRESET_ID;
+          if (settings.userPov === msg.id)
+            patch.userPov = DEFAULT_USER_POV_PRESET_ID;
+          if (Object.keys(patch).length > 0) {
+            const updated = await updateSettings(userId, patch);
+            send({ type: "settings", settings: updated });
+          }
+          send({ type: "pov-presets", presets: await listPovPresets(userId) });
+        } catch (err) {
+          const error = err instanceof Error ? err.message : String(err);
+          spindle.log.warn(`[Hone] delete-pov-preset failed: ${error}`);
+          send({ type: "pov-presets", presets: await listPovPresets(userId) });
+          send({ type: "pov-preset-error", error: `Failed to delete POV preset: ${error}` });
+        }
+        break;
+      }
+      case "duplicate-pov-preset": {
+        debug(userId, `ipc in: duplicate-pov-preset id="${msg.id}" slot=${msg.slot}`);
+        try {
+          const copy = await duplicatePovPreset(userId, msg.id);
+          const settingsKey = msg.slot === "input" ? "userPov" : "pov";
+          const updated = await updateSettings(userId, { [settingsKey]: copy.id });
+          send({ type: "settings", settings: updated });
+          send({ type: "pov-presets", presets: await listPovPresets(userId) });
+        } catch (err) {
+          const error = err instanceof Error ? err.message : String(err);
+          spindle.log.warn(`[Hone] duplicate-pov-preset failed: ${error}`);
+          send({ type: "pov-presets", presets: await listPovPresets(userId) });
+          send({ type: "pov-preset-error", error: `Failed to duplicate POV preset: ${error}` });
         }
         break;
       }
