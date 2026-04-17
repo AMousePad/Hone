@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "gen:assets": "bun scripts/gen-asset-modules.ts",
-    "build:backend": "bun build src/backend.ts --outfile dist/backend.js --target bun",
-    "build:frontend": "bun run gen:assets && bun build src/frontend.ts --outfile dist/frontend.js --target browser",
+    "build:backend": "bun build src/backend/index.ts --outfile dist/backend.js --target bun",
+    "build:frontend": "bun run gen:assets && bun build src/ui/index.ts --outfile dist/frontend.js --target browser",
     "build": "bun run typecheck && bun run build:backend && bun run build:frontend",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --dir local_tests"

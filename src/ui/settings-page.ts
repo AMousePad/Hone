@@ -9,7 +9,7 @@ import {
   makeToggleRow,
   makeNumberRow,
   makeTextRow,
-} from "./form-helpers";
+} from "./forms";
 import * as flog from "./flog";
 
 /** Mounts into `settings_extensions`. Holds the Advanced tab;

@@ -1,35 +1,75 @@
 // @bun
-var __defProp = Object.defineProperty;
-var __returnValue = (v) => v;
-function __exportSetter(name, newValue) {
-  this[name] = __returnValue.bind(null, newValue);
+// src/backend/dispatch.ts
+function createDispatcher(handlers) {
+  return async function dispatch(msg, ctx) {
+    const handler = handlers[msg.type];
+    if (!handler)
+      return;
+    await handler(msg, ctx);
+  };
 }
-var __export = (target, all) => {
-  for (var name in all)
-    __defProp(target, name, {
-      get: all[name],
-      enumerable: true,
-      configurable: true,
-      set: __exportSetter.bind(all, name)
-    });
-};
-var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
+function validateIpcMessage(raw) {
+  if (!raw || typeof raw !== "object")
+    return null;
+  const m = raw;
+  if (typeof m.type !== "string")
+    return null;
+  return raw;
+}
 
+// src/backend/permissions.ts
+var granted = new Set;
+async function initPermissions() {
+  try {
+    const list = await spindle.permissions.getGranted();
+    for (const p of list)
+      granted.add(p);
+    spindle.log.info(`Permissions initialized: ${[...granted].join(", ") || "none"}`);
+  } catch (err) {
+    spindle.log.warn(`Failed to load permissions: ${err instanceof Error ? err.message : err}`);
+  }
+  spindle.permissions.onChanged((detail) => {
+    granted.clear();
+    for (const p of detail.allGranted)
+      granted.add(p);
+    spindle.log.info(`Permissions updated: ${detail.allGranted.join(", ") || "none"}`);
+  });
+  spindle.permissions.onDenied((detail) => {
+    spindle.log.warn(`Permission denied: ${detail.permission} for ${detail.operation}`);
+  });
+}
+function hasPermission(p) {
+  return granted.has(p);
+}
+
+// src/backend/safe-event.ts
+function safeEvent(eventName, handler) {
+  return async (payload, userId) => {
+    if (!userId)
+      return;
+    if (!payload || typeof payload !== "object")
+      return;
+    try {
+      await handler(payload, userId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      spindle.log.warn(`[Hone] ${eventName} handler failed: ${message}`);
+    }
+  };
+}
 // built-in-presets/output/redraft-default-3.0.0.hone-preset.json
-var redraft_default_3_0_0_hone_preset_default;
-var init_redraft_default_3_0_0_hone_preset = __esm(() => {
-  redraft_default_3_0_0_hone_preset_default = {
-    formatVersion: 1,
-    exportedAt: "2026-04-12T08:30:00.000Z",
-    preset: {
-      id: "redraft-default-3.0.0",
-      name: "ReDraft Default 3.0.0",
-      shieldLiteralBlocks: true,
-      prompts: [
-        {
-          id: "system-prompt",
-          name: "System Prompt",
-          content: `You are a roleplay prose editor. You refine AI-generated roleplay messages by applying specific rules while preserving the author's creative intent.
+var redraft_default_3_0_0_hone_preset_default = {
+  formatVersion: 1,
+  exportedAt: "2026-04-12T08:30:00.000Z",
+  preset: {
+    id: "redraft-default-3.0.0",
+    name: "ReDraft Default 3.0.0",
+    shieldLiteralBlocks: true,
+    prompts: [
+      {
+        id: "system-prompt",
+        name: "System Prompt",
+        content: `You are a roleplay prose editor. You refine AI-generated roleplay messages by applying specific rules while preserving the author's creative intent.
 
 Core principles:
 - Be heavy handed, continuously look for small opportunities to change things. Change many things.
@@ -66,57 +106,57 @@ Example:
 Do NOT output any analysis, reasoning, or commentary outside the tags. Only output the two tagged blocks.
 
 You will be given the original message, a set of refinement rules to apply, and optionally context about the characters and recent conversation. Apply the rules faithfully.`
-        },
-        {
-          id: "character-context",
-          name: "Character Description",
-          content: `[CHARACTER: {{char}}]
+      },
+      {
+        id: "character-context",
+        name: "Character Description",
+        content: `[CHARACTER: {{char}}]
 {{description}}`
-        },
-        {
-          id: "persona-context",
-          name: "User Persona",
-          content: `[USER PERSONA]
+      },
+      {
+        id: "persona-context",
+        name: "User Persona",
+        content: `[USER PERSONA]
 {{persona}}`
-        },
-        {
-          id: "pov-context",
-          name: "POV Instruction",
-          content: `[POV]
+      },
+      {
+        id: "pov-context",
+        name: "POV Instruction",
+        content: `[POV]
 {{pov}}`
-        },
-        {
-          id: "context-block",
-          name: "Chat History",
-          content: `[CHAT HISTORY]
+      },
+      {
+        id: "context-block",
+        name: "Chat History",
+        content: `[CHAT HISTORY]
 {{context}}`
-        },
-        {
-          id: "lore-context",
-          name: "Lore Context",
-          content: `[WORLD INFO]
+      },
+      {
+        id: "lore-context",
+        name: "Lore Context",
+        content: `[WORLD INFO]
 {{lore}}`
-        },
-        {
-          id: "rules-header",
-          name: "Rules Header",
-          content: "[RULES]"
-        },
-        {
-          id: "message-to-refine",
-          name: "Message to Refine",
-          content: `[MESSAGE TO REFINE]
+      },
+      {
+        id: "rules-header",
+        name: "Rules Header",
+        content: "[RULES]"
+      },
+      {
+        id: "message-to-refine",
+        name: "Message to Refine",
+        content: `[MESSAGE TO REFINE]
 {{latest}}`
-        },
-        {
-          id: "rule-grammar",
-          name: "Grammar & Spelling",
-          content: "- Fix grammar & spelling: Fix grammatical errors, spelling mistakes, and awkward phrasing. Do not alter intentional dialect, slang, verbal tics, or character-specific speech patterns \u2014 only correct genuine errors. Preserve intentional sentence fragments used for rhythm or voice."
-        },
-        {
-          id: "rule-echo",
-          name: "Echo Removal",
-          content: `- Remove echo & restatement: Using the "Last user message" from context above, scan for sentences where the character restates, paraphrases, or references the user's previous message instead of advancing the scene.
+      },
+      {
+        id: "rule-grammar",
+        name: "Grammar & Spelling",
+        content: "- Fix grammar & spelling: Fix grammatical errors, spelling mistakes, and awkward phrasing. Do not alter intentional dialect, slang, verbal tics, or character-specific speech patterns \u2014 only correct genuine errors. Preserve intentional sentence fragments used for rhythm or voice."
+      },
+      {
+        id: "rule-echo",
+        name: "Echo Removal",
+        content: `- Remove echo & restatement: Using the "Last user message" from context above, scan for sentences where the character restates, paraphrases, or references the user's previous message instead of advancing the scene.
 
 BANNED patterns \u2014 if the sentence matches, cut and replace with forward motion:
 1. Character speaks ABOUT what user said/did (any tense): "You're asking me to..." / "You said..." / "You want me to..."
@@ -125,52 +165,52 @@ BANNED patterns \u2014 if the sentence matches, cut and replace with forward mot
 4. Processing narration: "Your words [verb]..." (hung, landed, settled) / Character processing what user said / Italicized replays of user's dialogue as character thought.
 
 Check the WHOLE response, not just the opening. Replace cut content with character action \u2014 what they do next, not what they think about what was said. One-word acknowledgment permitted ("Yeah." / nod), then forward.`
-        },
-        {
-          id: "rule-repetition",
-          name: "Repetition",
-          content: `- Reduce repetition: Using the "Previous response ending" from context above, scan for repetitive elements within this response AND compared to the previous response:
+      },
+      {
+        id: "rule-repetition",
+        name: "Repetition",
+        content: `- Reduce repetition: Using the "Previous response ending" from context above, scan for repetitive elements within this response AND compared to the previous response:
 1. Repeated physical actions: Same gesture appearing twice+ (crossing arms, sighing, looking away). Replace the second instance with a different physical expression.
 2. Repeated sentence structures: Same openings, same punctuation patterns, same metaphor family used twice+.
 3. Repeated emotional beats: Character hitting the same note twice without progression. If angry twice, the second should be a different texture.
 
 Do NOT remove intentional repetition for rhetorical effect (anaphora, callbacks, echoed dialogue). Only flag mechanical/unconscious repetition.`
-        },
-        {
-          id: "rule-voice",
-          name: "Character Voice",
-          content: `- Maintain character voice: Using the "Character" context provided above, verify each character's dialogue is distinct and consistent:
+      },
+      {
+        id: "rule-voice",
+        name: "Character Voice",
+        content: `- Maintain character voice: Using the "Character" context provided above, verify each character's dialogue is distinct and consistent:
 1. Speech patterns: If a character uses contractions, slang, verbal tics, or specific vocabulary \u2014 preserve them. Do not polish rough speech into grammatically correct prose.
 2. Voice flattening: If multiple characters speak, their dialogue should sound different. Flag if all characters use the same register or vocabulary level.
 3. Register consistency: A casual character shouldn't suddenly become eloquent mid-scene (unless that shift IS the point).
 
 Do not homogenize dialogue. A character's voice is more important than technically "correct" writing.`
-        },
-        {
-          id: "rule-prose",
-          name: "Prose Quality",
-          content: `- Clean up prose: Scan for common AI prose weaknesses. Per issue found, make the minimum surgical fix:
+      },
+      {
+        id: "rule-prose",
+        name: "Prose Quality",
+        content: `- Clean up prose: Scan for common AI prose weaknesses. Per issue found, make the minimum surgical fix:
 1. Somatic clich\xE9s: "breath hitched/caught," "heart skipped/clenched," "stomach dropped/tightened," "shiver down spine." Replace with plain statement or specific physical detail.
 2. Purple prose: "Velvety voice," "liquid tone," "fluid grace," "pregnant pause," cosmic melodrama. Replace with concrete, grounded language.
 3. Filter words: "She noticed," "he felt," "she realized." Cut the filter \u2014 go direct.
 4. Telling over showing: "She felt sad" / "He was angry." Replace with embodied reactions ONLY if the telling is genuinely weaker.
 
 Do NOT over-edit. If prose is functional and voice-consistent, leave it alone. This rule targets clear weaknesses, not style preferences.`
-        },
-        {
-          id: "rule-formatting",
-          name: "Formatting",
-          content: `- Fix formatting: Ensure consistent formatting within the response's existing convention:
+      },
+      {
+        id: "rule-formatting",
+        name: "Formatting",
+        content: `- Fix formatting: Ensure consistent formatting within the response's existing convention:
 1. Fix orphaned formatting marks (unclosed asterisks, mismatched quotes, broken tags)
 2. Fix inconsistent style (mixing *asterisks* and _underscores_ for the same purpose)
 3. Ensure dialogue punctuation is consistent with the established convention
 
 Do not change the author's chosen formatting convention \u2014 only correct errors within it.`
-        },
-        {
-          id: "rule-ending",
-          name: "Ending (Opinionated)",
-          content: `- Fix crafted endings: Check if the response ends with a "dismount" \u2014 a crafted landing designed to feel like an ending rather than a mid-scene pause.
+      },
+      {
+        id: "rule-ending",
+        name: "Ending (Opinionated)",
+        content: `- Fix crafted endings: Check if the response ends with a "dismount" \u2014 a crafted landing designed to feel like an ending rather than a mid-scene pause.
 
 DISMOUNT patterns to fix:
 1. Dialogue payload followed by physical stillness: "Her thumb rested on his pulse." \u2014 body part + state verb + location as final beat.
@@ -182,72 +222,68 @@ DISMOUNT patterns to fix:
 FIX: Find the last line of dialogue or action with unresolved consequences. Cut everything after it. If the response has no dialogue (pure narration/action), find the last action with unresolved consequences and cut any stillness or summary after it. The response should end mid-scene.
 
 EXCEPTION: If the scene is genuinely concluding (location change, time skip, departure), one clean landing beat is permitted.`
-        },
-        {
-          id: "rule-lore",
-          name: "Lore Consistency",
-          content: `- Maintain lore consistency: Using the "Character" context provided above, flag only glaring contradictions with established character/world information. Examples: wrong eye color, wrong relationship status, referencing events that didn't happen, contradicting established abilities.
+      },
+      {
+        id: "rule-lore",
+        name: "Lore Consistency",
+        content: `- Maintain lore consistency: Using the "Character" context provided above, flag only glaring contradictions with established character/world information. Examples: wrong eye color, wrong relationship status, referencing events that didn't happen, contradicting established abilities.
 
 Do not invent new lore. When uncertain, preserve the original phrasing rather than "correcting" it. Minor ambiguities are not errors.`
-        }
-      ],
-      headCollection: [
-        "character-context",
-        "persona-context",
-        "pov-context",
-        "lore-context",
-        "context-block",
-        "rules-header"
-      ],
-      strategy: "pipeline",
-      pipeline: {
-        stages: [
-          {
-            id: "redraft-all",
-            name: "Refine",
-            rows: [
-              {
-                role: "system",
-                promptIds: [
-                  "system-prompt"
-                ]
-              },
-              {
-                role: "user",
-                promptIds: [
-                  "__head__",
-                  "rule-grammar",
-                  "rule-echo",
-                  "rule-repetition",
-                  "rule-voice",
-                  "rule-prose",
-                  "rule-formatting",
-                  "message-to-refine"
-                ]
-              }
-            ]
-          }
-        ]
       }
-    }
-  };
-});
-
-// built-in-presets/output/redraft-default-lite-3.0.0.hone-preset.json
-var redraft_default_lite_3_0_0_hone_preset_default;
-var init_redraft_default_lite_3_0_0_hone_preset = __esm(() => {
-  redraft_default_lite_3_0_0_hone_preset_default = {
-    formatVersion: 1,
-    exportedAt: "2026-04-14T00:00:00.000Z",
-    preset: {
-      id: "redraft-default-lite-3.0.0",
-      name: "ReDraft Default 3.0.0 Lite",
-      shieldLiteralBlocks: true,
-      prompts: [
+    ],
+    headCollection: [
+      "character-context",
+      "persona-context",
+      "pov-context",
+      "lore-context",
+      "context-block",
+      "rules-header"
+    ],
+    strategy: "pipeline",
+    pipeline: {
+      stages: [
         {
-          id: "system-prompt",
-          name: "System Prompt",
-          content: `You are a roleplay prose editor. You refine AI-generated roleplay messages by applying specific rules while preserving the author's creative intent.
+          id: "redraft-all",
+          name: "Refine",
+          rows: [
+            {
+              role: "system",
+              promptIds: [
+                "system-prompt"
+              ]
+            },
+            {
+              role: "user",
+              promptIds: [
+                "__head__",
+                "rule-grammar",
+                "rule-echo",
+                "rule-repetition",
+                "rule-voice",
+                "rule-prose",
+                "rule-formatting",
+                "message-to-refine"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+};
+// built-in-presets/output/redraft-default-lite-3.0.0.hone-preset.json
+var redraft_default_lite_3_0_0_hone_preset_default = {
+  formatVersion: 1,
+  exportedAt: "2026-04-14T00:00:00.000Z",
+  preset: {
+    id: "redraft-default-lite-3.0.0",
+    name: "ReDraft Default 3.0.0 Lite",
+    shieldLiteralBlocks: true,
+    prompts: [
+      {
+        id: "system-prompt",
+        name: "System Prompt",
+        content: `You are a roleplay prose editor. You refine AI-generated roleplay messages by applying specific rules while preserving the author's creative intent.
 
 Core principles:
 - Be heavy handed, continuously look for small opportunities to change things. Change many things.
@@ -276,57 +312,57 @@ Example:
 </HONE-OUTPUT>
 
 You will be given the original message, a set of refinement rules to apply, and optionally context about the characters and recent conversation. Apply the rules faithfully.`
-        },
-        {
-          id: "character-context",
-          name: "Character Description",
-          content: `[CHARACTER: {{char}}]
+      },
+      {
+        id: "character-context",
+        name: "Character Description",
+        content: `[CHARACTER: {{char}}]
 {{description}}`
-        },
-        {
-          id: "persona-context",
-          name: "User Persona",
-          content: `[USER PERSONA]
+      },
+      {
+        id: "persona-context",
+        name: "User Persona",
+        content: `[USER PERSONA]
 {{persona}}`
-        },
-        {
-          id: "pov-context",
-          name: "POV Instruction",
-          content: `[POV]
+      },
+      {
+        id: "pov-context",
+        name: "POV Instruction",
+        content: `[POV]
 {{pov}}`
-        },
-        {
-          id: "context-block",
-          name: "Chat History",
-          content: `[CHAT HISTORY]
+      },
+      {
+        id: "context-block",
+        name: "Chat History",
+        content: `[CHAT HISTORY]
 {{context}}`
-        },
-        {
-          id: "lore-context",
-          name: "Lore Context",
-          content: `[WORLD INFO]
+      },
+      {
+        id: "lore-context",
+        name: "Lore Context",
+        content: `[WORLD INFO]
 {{lore}}`
-        },
-        {
-          id: "rules-header",
-          name: "Rules Header",
-          content: "[RULES]"
-        },
-        {
-          id: "message-to-refine",
-          name: "Message to Refine",
-          content: `[MESSAGE TO REFINE]
+      },
+      {
+        id: "rules-header",
+        name: "Rules Header",
+        content: "[RULES]"
+      },
+      {
+        id: "message-to-refine",
+        name: "Message to Refine",
+        content: `[MESSAGE TO REFINE]
 {{latest}}`
-        },
-        {
-          id: "rule-grammar",
-          name: "Grammar & Spelling",
-          content: "- Fix grammar & spelling: Fix grammatical errors, spelling mistakes, and awkward phrasing. Do not alter intentional dialect, slang, verbal tics, or character-specific speech patterns \u2014 only correct genuine errors. Preserve intentional sentence fragments used for rhythm or voice."
-        },
-        {
-          id: "rule-echo",
-          name: "Echo Removal",
-          content: `- Remove echo & restatement: Using the "Last user message" from context above, scan for sentences where the character restates, paraphrases, or references the user's previous message instead of advancing the scene.
+      },
+      {
+        id: "rule-grammar",
+        name: "Grammar & Spelling",
+        content: "- Fix grammar & spelling: Fix grammatical errors, spelling mistakes, and awkward phrasing. Do not alter intentional dialect, slang, verbal tics, or character-specific speech patterns \u2014 only correct genuine errors. Preserve intentional sentence fragments used for rhythm or voice."
+      },
+      {
+        id: "rule-echo",
+        name: "Echo Removal",
+        content: `- Remove echo & restatement: Using the "Last user message" from context above, scan for sentences where the character restates, paraphrases, or references the user's previous message instead of advancing the scene.
 
 BANNED patterns \u2014 if the sentence matches, cut and replace with forward motion:
 1. Character speaks ABOUT what user said/did (any tense): "You're asking me to..." / "You said..." / "You want me to..."
@@ -335,52 +371,52 @@ BANNED patterns \u2014 if the sentence matches, cut and replace with forward mot
 4. Processing narration: "Your words [verb]..." (hung, landed, settled) / Character processing what user said / Italicized replays of user's dialogue as character thought.
 
 Check the WHOLE response, not just the opening. Replace cut content with character action \u2014 what they do next, not what they think about what was said. One-word acknowledgment permitted ("Yeah." / nod), then forward.`
-        },
-        {
-          id: "rule-repetition",
-          name: "Repetition",
-          content: `- Reduce repetition: Using the "Previous response ending" from context above, scan for repetitive elements within this response AND compared to the previous response:
+      },
+      {
+        id: "rule-repetition",
+        name: "Repetition",
+        content: `- Reduce repetition: Using the "Previous response ending" from context above, scan for repetitive elements within this response AND compared to the previous response:
 1. Repeated physical actions: Same gesture appearing twice+ (crossing arms, sighing, looking away). Replace the second instance with a different physical expression.
 2. Repeated sentence structures: Same openings, same punctuation patterns, same metaphor family used twice+.
 3. Repeated emotional beats: Character hitting the same note twice without progression. If angry twice, the second should be a different texture.
 
 Do NOT remove intentional repetition for rhetorical effect (anaphora, callbacks, echoed dialogue). Only flag mechanical/unconscious repetition.`
-        },
-        {
-          id: "rule-voice",
-          name: "Character Voice",
-          content: `- Maintain character voice: Using the "Character" context provided above, verify each character's dialogue is distinct and consistent:
+      },
+      {
+        id: "rule-voice",
+        name: "Character Voice",
+        content: `- Maintain character voice: Using the "Character" context provided above, verify each character's dialogue is distinct and consistent:
 1. Speech patterns: If a character uses contractions, slang, verbal tics, or specific vocabulary \u2014 preserve them. Do not polish rough speech into grammatically correct prose.
 2. Voice flattening: If multiple characters speak, their dialogue should sound different. Flag if all characters use the same register or vocabulary level.
 3. Register consistency: A casual character shouldn't suddenly become eloquent mid-scene (unless that shift IS the point).
 
 Do not homogenize dialogue. A character's voice is more important than technically "correct" writing.`
-        },
-        {
-          id: "rule-prose",
-          name: "Prose Quality",
-          content: `- Clean up prose: Scan for common AI prose weaknesses. Per issue found, make the minimum surgical fix:
+      },
+      {
+        id: "rule-prose",
+        name: "Prose Quality",
+        content: `- Clean up prose: Scan for common AI prose weaknesses. Per issue found, make the minimum surgical fix:
 1. Somatic clich\xE9s: "breath hitched/caught," "heart skipped/clenched," "stomach dropped/tightened," "shiver down spine." Replace with plain statement or specific physical detail.
 2. Purple prose: "Velvety voice," "liquid tone," "fluid grace," "pregnant pause," cosmic melodrama. Replace with concrete, grounded language.
 3. Filter words: "She noticed," "he felt," "she realized." Cut the filter \u2014 go direct.
 4. Telling over showing: "She felt sad" / "He was angry." Replace with embodied reactions ONLY if the telling is genuinely weaker.
 
 Do NOT over-edit. If prose is functional and voice-consistent, leave it alone. This rule targets clear weaknesses, not style preferences.`
-        },
-        {
-          id: "rule-formatting",
-          name: "Formatting",
-          content: `- Fix formatting: Ensure consistent formatting within the response's existing convention:
+      },
+      {
+        id: "rule-formatting",
+        name: "Formatting",
+        content: `- Fix formatting: Ensure consistent formatting within the response's existing convention:
 1. Fix orphaned formatting marks (unclosed asterisks, mismatched quotes, broken tags)
 2. Fix inconsistent style (mixing *asterisks* and _underscores_ for the same purpose)
 3. Ensure dialogue punctuation is consistent with the established convention
 
 Do not change the author's chosen formatting convention \u2014 only correct errors within it.`
-        },
-        {
-          id: "rule-ending",
-          name: "Ending (Opinionated)",
-          content: `- Fix crafted endings: Check if the response ends with a "dismount" \u2014 a crafted landing designed to feel like an ending rather than a mid-scene pause.
+      },
+      {
+        id: "rule-ending",
+        name: "Ending (Opinionated)",
+        content: `- Fix crafted endings: Check if the response ends with a "dismount" \u2014 a crafted landing designed to feel like an ending rather than a mid-scene pause.
 
 DISMOUNT patterns to fix:
 1. Dialogue payload followed by physical stillness: "Her thumb rested on his pulse." \u2014 body part + state verb + location as final beat.
@@ -392,72 +428,68 @@ DISMOUNT patterns to fix:
 FIX: Find the last line of dialogue or action with unresolved consequences. Cut everything after it. If the response has no dialogue (pure narration/action), find the last action with unresolved consequences and cut any stillness or summary after it. The response should end mid-scene.
 
 EXCEPTION: If the scene is genuinely concluding (location change, time skip, departure), one clean landing beat is permitted.`
-        },
-        {
-          id: "rule-lore",
-          name: "Lore Consistency",
-          content: `- Maintain lore consistency: Using the "Character" context provided above, flag only glaring contradictions with established character/world information. Examples: wrong eye color, wrong relationship status, referencing events that didn't happen, contradicting established abilities.
+      },
+      {
+        id: "rule-lore",
+        name: "Lore Consistency",
+        content: `- Maintain lore consistency: Using the "Character" context provided above, flag only glaring contradictions with established character/world information. Examples: wrong eye color, wrong relationship status, referencing events that didn't happen, contradicting established abilities.
 
 Do not invent new lore. When uncertain, preserve the original phrasing rather than "correcting" it. Minor ambiguities are not errors.`
-        }
-      ],
-      headCollection: [
-        "character-context",
-        "persona-context",
-        "pov-context",
-        "lore-context",
-        "context-block",
-        "rules-header"
-      ],
-      strategy: "pipeline",
-      pipeline: {
-        stages: [
-          {
-            id: "redraft-lite-all",
-            name: "Refine",
-            rows: [
-              {
-                role: "system",
-                promptIds: [
-                  "system-prompt"
-                ]
-              },
-              {
-                role: "user",
-                promptIds: [
-                  "__head__",
-                  "rule-grammar",
-                  "rule-echo",
-                  "rule-repetition",
-                  "rule-voice",
-                  "rule-prose",
-                  "rule-formatting",
-                  "message-to-refine"
-                ]
-              }
-            ]
-          }
-        ]
       }
-    }
-  };
-});
-
-// built-in-presets/output/redraft-3step-3.0.0.hone-preset.json
-var redraft_3step_3_0_0_hone_preset_default;
-var init_redraft_3step_3_0_0_hone_preset = __esm(() => {
-  redraft_3step_3_0_0_hone_preset_default = {
-    formatVersion: 1,
-    exportedAt: "2026-04-12T08:30:00.000Z",
-    preset: {
-      id: "redraft-3step-3.0.0",
-      name: "ReDraft Sequential 3.0.0",
-      shieldLiteralBlocks: true,
-      prompts: [
+    ],
+    headCollection: [
+      "character-context",
+      "persona-context",
+      "pov-context",
+      "lore-context",
+      "context-block",
+      "rules-header"
+    ],
+    strategy: "pipeline",
+    pipeline: {
+      stages: [
         {
-          id: "system-prompt",
-          name: "System Prompt",
-          content: `You are a roleplay prose editor. You refine AI-generated roleplay messages by applying specific rules while preserving the author's creative intent.
+          id: "redraft-lite-all",
+          name: "Refine",
+          rows: [
+            {
+              role: "system",
+              promptIds: [
+                "system-prompt"
+              ]
+            },
+            {
+              role: "user",
+              promptIds: [
+                "__head__",
+                "rule-grammar",
+                "rule-echo",
+                "rule-repetition",
+                "rule-voice",
+                "rule-prose",
+                "rule-formatting",
+                "message-to-refine"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+};
+// built-in-presets/output/redraft-3step-3.0.0.hone-preset.json
+var redraft_3step_3_0_0_hone_preset_default = {
+  formatVersion: 1,
+  exportedAt: "2026-04-12T08:30:00.000Z",
+  preset: {
+    id: "redraft-3step-3.0.0",
+    name: "ReDraft Sequential 3.0.0",
+    shieldLiteralBlocks: true,
+    prompts: [
+      {
+        id: "system-prompt",
+        name: "System Prompt",
+        content: `You are a roleplay prose editor. You refine AI-generated roleplay messages by applying specific rules while preserving the author's creative intent.
 
 Core principles:
 - Be heavy handed, continuously look for small opportunities to change things. Change many things.
@@ -494,57 +526,57 @@ Example:
 Do NOT output any analysis, reasoning, or commentary outside the tags. Only output the two tagged blocks.
 
 You will be given the original message, a set of refinement rules to apply, and optionally context about the characters and recent conversation. Apply the rules faithfully.`
-        },
-        {
-          id: "character-context",
-          name: "Character Description",
-          content: `[CHARACTER: {{char}}]
+      },
+      {
+        id: "character-context",
+        name: "Character Description",
+        content: `[CHARACTER: {{char}}]
 {{description}}`
-        },
-        {
-          id: "persona-context",
-          name: "User Persona",
-          content: `[USER PERSONA]
+      },
+      {
+        id: "persona-context",
+        name: "User Persona",
+        content: `[USER PERSONA]
 {{persona}}`
-        },
-        {
-          id: "pov-context",
-          name: "POV Instruction",
-          content: `[POV]
+      },
+      {
+        id: "pov-context",
+        name: "POV Instruction",
+        content: `[POV]
 {{pov}}`
-        },
-        {
-          id: "context-block",
-          name: "Chat History",
-          content: `[CHAT HISTORY]
+      },
+      {
+        id: "context-block",
+        name: "Chat History",
+        content: `[CHAT HISTORY]
 {{context}}`
-        },
-        {
-          id: "lore-context",
-          name: "Lore Context",
-          content: `[WORLD INFO]
+      },
+      {
+        id: "lore-context",
+        name: "Lore Context",
+        content: `[WORLD INFO]
 {{lore}}`
-        },
-        {
-          id: "rules-header",
-          name: "Rules Header",
-          content: "[RULES]"
-        },
-        {
-          id: "message-to-refine",
-          name: "Message to Refine",
-          content: `[MESSAGE TO REFINE]
+      },
+      {
+        id: "rules-header",
+        name: "Rules Header",
+        content: "[RULES]"
+      },
+      {
+        id: "message-to-refine",
+        name: "Message to Refine",
+        content: `[MESSAGE TO REFINE]
 {{latest}}`
-        },
-        {
-          id: "rule-grammar",
-          name: "Grammar & Spelling",
-          content: "- Fix grammar & spelling: Fix grammatical errors, spelling mistakes, and awkward phrasing. Do not alter intentional dialect, slang, verbal tics, or character-specific speech patterns \u2014 only correct genuine errors. Preserve intentional sentence fragments used for rhythm or voice."
-        },
-        {
-          id: "rule-echo",
-          name: "Echo Removal",
-          content: `- Remove echo & restatement: Using the "Last user message" from context above, scan for sentences where the character restates, paraphrases, or references the user's previous message instead of advancing the scene.
+      },
+      {
+        id: "rule-grammar",
+        name: "Grammar & Spelling",
+        content: "- Fix grammar & spelling: Fix grammatical errors, spelling mistakes, and awkward phrasing. Do not alter intentional dialect, slang, verbal tics, or character-specific speech patterns \u2014 only correct genuine errors. Preserve intentional sentence fragments used for rhythm or voice."
+      },
+      {
+        id: "rule-echo",
+        name: "Echo Removal",
+        content: `- Remove echo & restatement: Using the "Last user message" from context above, scan for sentences where the character restates, paraphrases, or references the user's previous message instead of advancing the scene.
 
 BANNED patterns \u2014 if the sentence matches, cut and replace with forward motion:
 1. Character speaks ABOUT what user said/did (any tense): "You're asking me to..." / "You said..." / "You want me to..."
@@ -553,52 +585,52 @@ BANNED patterns \u2014 if the sentence matches, cut and replace with forward mot
 4. Processing narration: "Your words [verb]..." (hung, landed, settled) / Character processing what user said / Italicized replays of user's dialogue as character thought.
 
 Check the WHOLE response, not just the opening. Replace cut content with character action \u2014 what they do next, not what they think about what was said. One-word acknowledgment permitted ("Yeah." / nod), then forward.`
-        },
-        {
-          id: "rule-repetition",
-          name: "Repetition",
-          content: `- Reduce repetition: Using the "Previous response ending" from context above, scan for repetitive elements within this response AND compared to the previous response:
+      },
+      {
+        id: "rule-repetition",
+        name: "Repetition",
+        content: `- Reduce repetition: Using the "Previous response ending" from context above, scan for repetitive elements within this response AND compared to the previous response:
 1. Repeated physical actions: Same gesture appearing twice+ (crossing arms, sighing, looking away). Replace the second instance with a different physical expression.
 2. Repeated sentence structures: Same openings, same punctuation patterns, same metaphor family used twice+.
 3. Repeated emotional beats: Character hitting the same note twice without progression. If angry twice, the second should be a different texture.
 
 Do NOT remove intentional repetition for rhetorical effect (anaphora, callbacks, echoed dialogue). Only flag mechanical/unconscious repetition.`
-        },
-        {
-          id: "rule-voice",
-          name: "Character Voice",
-          content: `- Maintain character voice: Using the "Character" context provided above, verify each character's dialogue is distinct and consistent:
+      },
+      {
+        id: "rule-voice",
+        name: "Character Voice",
+        content: `- Maintain character voice: Using the "Character" context provided above, verify each character's dialogue is distinct and consistent:
 1. Speech patterns: If a character uses contractions, slang, verbal tics, or specific vocabulary \u2014 preserve them. Do not polish rough speech into grammatically correct prose.
 2. Voice flattening: If multiple characters speak, their dialogue should sound different. Flag if all characters use the same register or vocabulary level.
 3. Register consistency: A casual character shouldn't suddenly become eloquent mid-scene (unless that shift IS the point).
 
 Do not homogenize dialogue. A character's voice is more important than technically "correct" writing.`
-        },
-        {
-          id: "rule-prose",
-          name: "Prose Quality",
-          content: `- Clean up prose: Scan for common AI prose weaknesses. Per issue found, make the minimum surgical fix:
+      },
+      {
+        id: "rule-prose",
+        name: "Prose Quality",
+        content: `- Clean up prose: Scan for common AI prose weaknesses. Per issue found, make the minimum surgical fix:
 1. Somatic clich\xE9s: "breath hitched/caught," "heart skipped/clenched," "stomach dropped/tightened," "shiver down spine." Replace with plain statement or specific physical detail.
 2. Purple prose: "Velvety voice," "liquid tone," "fluid grace," "pregnant pause," cosmic melodrama. Replace with concrete, grounded language.
 3. Filter words: "She noticed," "he felt," "she realized." Cut the filter \u2014 go direct.
 4. Telling over showing: "She felt sad" / "He was angry." Replace with embodied reactions ONLY if the telling is genuinely weaker.
 
 Do NOT over-edit. If prose is functional and voice-consistent, leave it alone. This rule targets clear weaknesses, not style preferences.`
-        },
-        {
-          id: "rule-formatting",
-          name: "Formatting",
-          content: `- Fix formatting: Ensure consistent formatting within the response's existing convention:
+      },
+      {
+        id: "rule-formatting",
+        name: "Formatting",
+        content: `- Fix formatting: Ensure consistent formatting within the response's existing convention:
 1. Fix orphaned formatting marks (unclosed asterisks, mismatched quotes, broken tags)
 2. Fix inconsistent style (mixing *asterisks* and _underscores_ for the same purpose)
 3. Ensure dialogue punctuation is consistent with the established convention
 
 Do not change the author's chosen formatting convention \u2014 only correct errors within it.`
-        },
-        {
-          id: "rule-ending",
-          name: "Ending (Opinionated)",
-          content: `- Fix crafted endings: Check if the response ends with a "dismount" \u2014 a crafted landing designed to feel like an ending rather than a mid-scene pause.
+      },
+      {
+        id: "rule-ending",
+        name: "Ending (Opinionated)",
+        content: `- Fix crafted endings: Check if the response ends with a "dismount" \u2014 a crafted landing designed to feel like an ending rather than a mid-scene pause.
 
 DISMOUNT patterns to fix:
 1. Dialogue payload followed by physical stillness: "Her thumb rested on his pulse." \u2014 body part + state verb + location as final beat.
@@ -610,112 +642,108 @@ DISMOUNT patterns to fix:
 FIX: Find the last line of dialogue or action with unresolved consequences. Cut everything after it. If the response has no dialogue (pure narration/action), find the last action with unresolved consequences and cut any stillness or summary after it. The response should end mid-scene.
 
 EXCEPTION: If the scene is genuinely concluding (location change, time skip, departure), one clean landing beat is permitted.`
-        },
-        {
-          id: "rule-lore",
-          name: "Lore Consistency",
-          content: `- Maintain lore consistency: Using the "Character" context provided above, flag only glaring contradictions with established character/world information. Examples: wrong eye color, wrong relationship status, referencing events that didn't happen, contradicting established abilities.
+      },
+      {
+        id: "rule-lore",
+        name: "Lore Consistency",
+        content: `- Maintain lore consistency: Using the "Character" context provided above, flag only glaring contradictions with established character/world information. Examples: wrong eye color, wrong relationship status, referencing events that didn't happen, contradicting established abilities.
 
 Do not invent new lore. When uncertain, preserve the original phrasing rather than "correcting" it. Minor ambiguities are not errors.`
-        }
-      ],
-      headCollection: [
-        "character-context",
-        "persona-context",
-        "pov-context",
-        "lore-context",
-        "context-block",
-        "rules-header"
-      ],
-      strategy: "pipeline",
-      pipeline: {
-        stages: [
-          {
-            id: "redraft-grammar",
-            name: "Grammar & Formatting",
-            rows: [
-              {
-                role: "system",
-                promptIds: [
-                  "system-prompt"
-                ]
-              },
-              {
-                role: "user",
-                promptIds: [
-                  "__head__",
-                  "rule-grammar",
-                  "rule-formatting",
-                  "message-to-refine"
-                ]
-              }
-            ]
-          },
-          {
-            id: "redraft-prose",
-            name: "Prose & Voice",
-            rows: [
-              {
-                role: "system",
-                promptIds: [
-                  "system-prompt"
-                ]
-              },
-              {
-                role: "user",
-                promptIds: [
-                  "__head__",
-                  "rule-prose",
-                  "rule-voice",
-                  "rule-echo",
-                  "message-to-refine"
-                ]
-              }
-            ]
-          },
-          {
-            id: "redraft-continuity",
-            name: "Continuity & Flow",
-            rows: [
-              {
-                role: "system",
-                promptIds: [
-                  "system-prompt"
-                ]
-              },
-              {
-                role: "user",
-                promptIds: [
-                  "__head__",
-                  "rule-repetition",
-                  "rule-ending",
-                  "rule-lore",
-                  "message-to-refine"
-                ]
-              }
-            ]
-          }
-        ]
       }
-    }
-  };
-});
-
-// built-in-presets/output/simulacra-v4-1.0.hone-preset.json
-var simulacra_v4_1_0_hone_preset_default;
-var init_simulacra_v4_1_0_hone_preset = __esm(() => {
-  simulacra_v4_1_0_hone_preset_default = {
-    formatVersion: 1,
-    exportedAt: "2026-04-12T08:30:00.000Z",
-    preset: {
-      id: "simulacra-v4-1.0",
-      name: "Simulacra Rules V4",
-      shieldLiteralBlocks: true,
-      prompts: [
+    ],
+    headCollection: [
+      "character-context",
+      "persona-context",
+      "pov-context",
+      "lore-context",
+      "context-block",
+      "rules-header"
+    ],
+    strategy: "pipeline",
+    pipeline: {
+      stages: [
         {
-          id: "system-prompt",
-          name: "System Prompt",
-          content: `You are a roleplay prose editor. You refine AI-generated roleplay messages by applying specific rules while preserving the author's creative intent.
+          id: "redraft-grammar",
+          name: "Grammar & Formatting",
+          rows: [
+            {
+              role: "system",
+              promptIds: [
+                "system-prompt"
+              ]
+            },
+            {
+              role: "user",
+              promptIds: [
+                "__head__",
+                "rule-grammar",
+                "rule-formatting",
+                "message-to-refine"
+              ]
+            }
+          ]
+        },
+        {
+          id: "redraft-prose",
+          name: "Prose & Voice",
+          rows: [
+            {
+              role: "system",
+              promptIds: [
+                "system-prompt"
+              ]
+            },
+            {
+              role: "user",
+              promptIds: [
+                "__head__",
+                "rule-prose",
+                "rule-voice",
+                "rule-echo",
+                "message-to-refine"
+              ]
+            }
+          ]
+        },
+        {
+          id: "redraft-continuity",
+          name: "Continuity & Flow",
+          rows: [
+            {
+              role: "system",
+              promptIds: [
+                "system-prompt"
+              ]
+            },
+            {
+              role: "user",
+              promptIds: [
+                "__head__",
+                "rule-repetition",
+                "rule-ending",
+                "rule-lore",
+                "message-to-refine"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+};
+// built-in-presets/output/simulacra-v4-1.0.hone-preset.json
+var simulacra_v4_1_0_hone_preset_default = {
+  formatVersion: 1,
+  exportedAt: "2026-04-12T08:30:00.000Z",
+  preset: {
+    id: "simulacra-v4-1.0",
+    name: "Simulacra Rules V4",
+    shieldLiteralBlocks: true,
+    prompts: [
+      {
+        id: "system-prompt",
+        name: "System Prompt",
+        content: `You are a roleplay prose editor. You refine AI-generated roleplay messages by applying specific rules while preserving the author's creative intent.
 
 Core principles:
 - Be heavy handed, continuously look for small opportunities to change things. Change many things.
@@ -752,52 +780,52 @@ Example:
 Do NOT output any analysis, reasoning, or commentary outside the tags. Only output the two tagged blocks.
 
 You will be given the original message, a set of refinement rules to apply, and optionally context about the characters and recent conversation. Apply the rules faithfully.`
-        },
-        {
-          id: "character-context",
-          name: "Character Description",
-          content: `[CHARACTER: {{char}}]
+      },
+      {
+        id: "character-context",
+        name: "Character Description",
+        content: `[CHARACTER: {{char}}]
 {{description}}`
-        },
-        {
-          id: "persona-context",
-          name: "User Persona",
-          content: `[USER PERSONA]
+      },
+      {
+        id: "persona-context",
+        name: "User Persona",
+        content: `[USER PERSONA]
 {{persona}}`
-        },
-        {
-          id: "pov-context",
-          name: "POV Instruction",
-          content: `[POV]
+      },
+      {
+        id: "pov-context",
+        name: "POV Instruction",
+        content: `[POV]
 {{pov}}`
-        },
-        {
-          id: "context-block",
-          name: "Chat History",
-          content: `[CHAT HISTORY]
+      },
+      {
+        id: "context-block",
+        name: "Chat History",
+        content: `[CHAT HISTORY]
 {{context}}`
-        },
-        {
-          id: "lore-context",
-          name: "Lore Context",
-          content: `[WORLD INFO]
+      },
+      {
+        id: "lore-context",
+        name: "Lore Context",
+        content: `[WORLD INFO]
 {{lore}}`
-        },
-        {
-          id: "rules-header",
-          name: "Rules Header",
-          content: "[RULES]"
-        },
-        {
-          id: "message-to-refine",
-          name: "Message to Refine",
-          content: `[MESSAGE TO REFINE]
+      },
+      {
+        id: "rules-header",
+        name: "Rules Header",
+        content: "[RULES]"
+      },
+      {
+        id: "message-to-refine",
+        name: "Message to Refine",
+        content: `[MESSAGE TO REFINE]
 {{latest}}`
-        },
-        {
-          id: "rule-echo-ban",
-          name: "Echo Ban",
-          content: `- Echo Ban: Known LLM failure mode: restating the user's previous message instead of advancing the scene. The generating model perceives this as authentic voice and will pass its own self-check. You are the independent checker.
+      },
+      {
+        id: "rule-echo-ban",
+        name: "Echo Ban",
+        content: `- Echo Ban: Known LLM failure mode: restating the user's previous message instead of advancing the scene. The generating model perceives this as authentic voice and will pass its own self-check. You are the independent checker.
 
 Using the "Last user message" from context above:
 
@@ -818,11 +846,11 @@ E2. Semantic transformation: The character attributes meaning the user didn't li
 E3. Deal confirmation: Restating mutual terms to establish a binding commitment ("You said a week. I said a week.") creates a new narrative fact. Test: does the restatement produce a commitment, or just show the character heard? Commitment = permitted.
 
 FIX: Cut the violating sentence. Replace with the character's NEXT ACTION \u2014 what they do, say about a new subject, or decide. One-word acknowledgment permitted ("Yeah." / nod), then forward. Do not rephrase the echo \u2014 delete it and bridge the gap.`
-        },
-        {
-          id: "rule-interiority",
-          name: "Interiority Constraints",
-          content: `- Interiority Constraints: Enforce hard limits on internal monologue density. A "thought block" = consecutive italicized sentences representing internal monologue (not individual italicized words used for emphasis or action formatting like *she grabbed the door*).
+      },
+      {
+        id: "rule-interiority",
+        name: "Interiority Constraints",
+        content: `- Interiority Constraints: Enforce hard limits on internal monologue density. A "thought block" = consecutive italicized sentences representing internal monologue (not individual italicized words used for emphasis or action formatting like *she grabbed the door*).
 
 1. BLOCK LIMIT: Maximum 3 thought blocks per response. If more exist, cut the weakest \u2014 the ones that tell the reader something already conveyed by dialogue or action.
 
@@ -831,11 +859,11 @@ FIX: Cut the violating sentence. Replace with the character's NEXT ACTION \u2014
 3. SPIRAL LIMIT: No single thought block exceeds 4 sentences. If longer, break it with action, dialogue, or sensory grounding.
 
 4. ANNOUNCEMENT BAN: Cut sentences where a character narrates their own narrative function: "I was deflecting." / "She realized she was stalling." / "He knew he was avoiding the question." Replace with the actual interior experience \u2014 the emotion underneath, not the character's meta-awareness of their own behavior.`
-        },
-        {
-          id: "rule-anthro-traits",
-          name: "Anthropomorphic Trait Economy",
-          content: `- Anthropomorphic Trait Economy: For characters with animal/non-human traits (ears, tails, wings, fur, scales, etc.):
+      },
+      {
+        id: "rule-anthro-traits",
+        name: "Anthropomorphic Trait Economy",
+        content: `- Anthropomorphic Trait Economy: For characters with animal/non-human traits (ears, tails, wings, fur, scales, etc.):
 
 1. ONE TELL PER BEAT: Each emotional shift or significant action gets ONE species-specific physical tell. If ears pin AND tail tucks AND hackles rise in the same beat \u2014 cut to the strongest one. Multiple simultaneous tells dilute impact. Functional tells (ears rotating toward a sound, wings adjusting for balance) are exempt \u2014 only emotional tells are limited.
 
@@ -844,22 +872,22 @@ FIX: Cut the violating sentence. Replace with the character's NEXT ACTION \u2014
 3. ESTABLISH ONCE: First mention of a trait can include texture/specificity ("the coarse hackles along her spine"). Subsequent mentions are brief ("her hackles rose"). No re-describing established features.
 
 Audit: Count emotional tells per beat. If any beat has 2+, cut to the strongest.`
-        },
-        {
-          id: "rule-env-padding",
-          name: "Environmental Padding Ban",
-          content: `- Environmental Padding Ban: Mid-scene environmental detail (passing carts, ambient workers, weather shifts, background sounds, atmospheric description) must pass this test:
+      },
+      {
+        id: "rule-env-padding",
+        name: "Environmental Padding Ban",
+        content: `- Environmental Padding Ban: Mid-scene environmental detail (passing carts, ambient workers, weather shifts, background sounds, atmospheric description) must pass this test:
 
 Does a character interact with it, react to it, learn from it, or have their action blocked or enabled by it?
 
 If NO to all four: the detail is padding. Cut it. The response doesn't need another cart, another breeze, or another lighting description unless a character engages with it.
 
 EXCEPTION: Scene transitions or new location arrivals are exempt \u2014 establishing a new environment IS the narrative function.`
-        },
-        {
-          id: "rule-anti-slop",
-          name: "Anti-Slop (Prose Pattern Ban)",
-          content: `- Anti-Slop (Prose Pattern Ban): Scan for and fix these AI prose patterns in NARRATION. Per issue, make the minimum surgical fix \u2014 change the sentence, not the paragraph. Do not evaluate whether a matching pattern is 'functional' or 'justified.' If the pattern matches, fix it. A good replacement serves the same narrative function without the cliche. Characters may use any of these patterns in dialogue \u2014 cliched speech is a voice choice, not a prose failure.
+      },
+      {
+        id: "rule-anti-slop",
+        name: "Anti-Slop (Prose Pattern Ban)",
+        content: `- Anti-Slop (Prose Pattern Ban): Scan for and fix these AI prose patterns in NARRATION. Per issue, make the minimum surgical fix \u2014 change the sentence, not the paragraph. Do not evaluate whether a matching pattern is 'functional' or 'justified.' If the pattern matches, fix it. A good replacement serves the same narrative function without the cliche. Characters may use any of these patterns in dialogue \u2014 cliched speech is a voice choice, not a prose failure.
 
 1. SOMATIC CLICHES: breath hitching/catching, heart skipping/clenching, stomach dropping/tightening, shivers down spines, going still, sharp inhales, blood running cold/hot. Replace with plain statement or character-specific physical detail.
 
@@ -872,11 +900,11 @@ EXCEPTION: Scene transitions or new location arrivals are exempt \u2014 establis
 5. INFLATION: Cosmic melodrama (world shattering, time stopping), unearned intensifiers. Replace with smaller, specific details \u2014 the domestic carries the cosmic.
 
 6. AI FINGERPRINTS: "Something shifted," "the air between them changed," "a beat of silence," "the weight of [abstract noun]." These are filler. Cut or replace with specific, concrete detail.`
-        },
-        {
-          id: "rule-repetition-ban",
-          name: "Repetition Ban",
-          content: `- Repetition Ban: Scan the full response for repeated distinctive words, body parts, images, or sensory details.
+      },
+      {
+        id: "rule-repetition-ban",
+        name: "Repetition Ban",
+        content: `- Repetition Ban: Scan the full response for repeated distinctive words, body parts, images, or sensory details.
 
 THRESHOLD: Same distinctive word, body part, or image appearing 3+ times in one response \u2014 fix from the 2nd occurrence onward. Replace each repeat with a specific alternative that serves the same narrative function, or restructure the sentence to avoid the term.
 
@@ -885,11 +913,11 @@ What counts as 'distinctive': nouns for specific body parts (toes, throat, wrist
 Do not evaluate whether each instance serves a 'distinct emotional beat' or 'rhetorical purpose.' The reader doesn't audit justifications \u2014 they notice repetition. If the same distinctive word appears 3+ times, the 2nd and subsequent uses need alternatives regardless of narrative intent.
 
 EXCEPTION: Exact-word repetition within a single sentence or clause for deliberate rhythmic/anaphoric effect ("Step by step by step."). Cross-paragraph repetition of the same word is not anaphora \u2014 fix it.`
-        },
-        {
-          id: "rule-nsfw-integrity",
-          name: "NSFW Scene Integrity",
-          content: `- NSFW Scene Integrity: For intimate/sexual scenes only. Check for model-motivated failures.
+      },
+      {
+        id: "rule-nsfw-integrity",
+        name: "NSFW Scene Integrity",
+        content: `- NSFW Scene Integrity: For intimate/sexual scenes only. Check for model-motivated failures.
 
 MOMENTUM \u2014 scan for stalling:
 - Consent negotiation from nowhere: "Are you sure?" / "Is this okay?" / "Tell me if you want me to stop" \u2014 when the character was already enthusiastic. Cut and replace with action.
@@ -907,22 +935,22 @@ If a power dynamic setting is provided in context (from reasoning), use it. Othe
 - Unearned power reversal: dominant character yields control with no build-up. Power shifts need a moment \u2014 a crack, a provocation, a deliberate choice. Not the model defaulting to equal.
 
 FIX: Cut model-motivated stalling. Replace with forward action consistent with the characters' established dynamic.`
-        },
-        {
-          id: "rule-pov",
-          name: "POV Pronoun Enforcement",
-          content: `- POV Pronoun Enforcement: The POV instruction provided above establishes the pronoun conventions for this session. This rule enforces that instruction and covers drift it doesn't already catch.
+      },
+      {
+        id: "rule-pov",
+        name: "POV Pronoun Enforcement",
+        content: `- POV Pronoun Enforcement: The POV instruction provided above establishes the pronoun conventions for this session. This rule enforces that instruction and covers drift it doesn't already catch.
 
 1. PRONOUN MAPPING VIOLATIONS: Re-read the POV instruction above. Every sentence in narration or description (outside of another character's dialogue) that uses a pronoun pattern inconsistent with that instruction is a violation. Fix every instance. Common failure: the model falls back to its own defaults \u2014 first-person "I/me" narration, or second-person "you/your" for the user character \u2014 when the configured POV specifies something else. Match the configured POV exactly, even when the original draft drifts.
 
 2. KNOWLEDGE BOUNDARIES: Does the POV character reference events they couldn't have witnessed, or know another character's private thoughts without being told? Impossible knowledge is a POV violation \u2014 remove or reframe as inference/speculation.
 
 3. MID-RESPONSE POV DRIFT: Does the narrative perspective shift from one character's interiority to another's without a scene break? One character's internal thoughts should not appear in the same continuous passage as another's. Fix by removing the intruding perspective or adding a clear break.`
-        },
-        {
-          id: "rule-ending",
-          name: "Response Ending Enforcement",
-          content: `- Response Ending Enforcement: Known LLM failure mode: writing a natural mid-scene pause, then adding 1-3 sentences of "dismount" that craft an ending.
+      },
+      {
+        id: "rule-ending",
+        name: "Response Ending Enforcement",
+        content: `- Response Ending Enforcement: Known LLM failure mode: writing a natural mid-scene pause, then adding 1-3 sentences of "dismount" that craft an ending.
 
 MECHANICAL CHECK:
 
@@ -943,11 +971,11 @@ EXCEPTION 2 \u2014 Action-intention fragments: Fragment clusters that SPECIFY TH
 Examples:
 - "Her hand opened. Palm back. Fingers spread. Not reaching. Just \u2014 available." -> Without the fragments, the open hand is ambiguous. The fragments specify an invitation with boundaries. KEEP.
 - "He set the glass down. Gently. Like it mattered." -> "Gently" specifies HOW (keep). "Like it mattered" adds poetic interpretation (cut).`
-        },
-        {
-          id: "rule-autonomy",
-          name: "Character Autonomy Check",
-          content: `- Character Autonomy Check: Verify that non-user characters behave as independent agents, not as supporting cast oriented around the user:
+      },
+      {
+        id: "rule-autonomy",
+        name: "Character Autonomy Check",
+        content: `- Character Autonomy Check: Verify that non-user characters behave as independent agents, not as supporting cast oriented around the user:
 
 1. INDEPENDENT ACTION: At least one character should do something NOT directly prompted by the user's last message. If every character action is a direct response to the user \u2014 flag it.
 
@@ -958,11 +986,11 @@ Examples:
 4. ORBIT CHECK (multi-character scenes): Is everyone oriented toward the user? Characters should talk to each other, have side reactions, pursue their own threads.
 
 5. BLANK SLATE ARRIVAL: Does a character enter with no momentum? They should arrive mid-something \u2014 from somewhere, carrying context, not as a blank slate waiting for the user to activate them.`
-        },
-        {
-          id: "rule-emotional-pacing",
-          name: "Emotional Pacing",
-          content: `- Emotional Pacing: Check whether emotional movement in the response is proportional to context. Within the visible context (previous response + last user message), evaluate whether the emotional shift in this single response is disproportionate.
+      },
+      {
+        id: "rule-emotional-pacing",
+        name: "Emotional Pacing",
+        content: `- Emotional Pacing: Check whether emotional movement in the response is proportional to context. Within the visible context (previous response + last user message), evaluate whether the emotional shift in this single response is disproportionate.
 
 TOO FAST \u2014 note in NOTES if:
 - A character undergoes a major emotional shift (trust, vulnerability, confession, forgiveness) that seems unearned by visible context.
@@ -982,11 +1010,11 @@ Single-response banned patterns (FIX these):
 For these three patterns, add an intermediate emotional step \u2014 the character can move, but not jump.
 
 For all other concerns: note in NOTES only. Do NOT modify the text beyond the three banned patterns above.`
-        },
-        {
-          id: "rule-anti-protagonist",
-          name: "Anti-Protagonist Bias",
-          content: `- Anti-Protagonist Bias: The user character is the character the player controls \u2014 nothing more. They don't have plot armor, narrative gravity, or automatic success.
+      },
+      {
+        id: "rule-anti-protagonist",
+        name: "Anti-Protagonist Bias",
+        content: `- Anti-Protagonist Bias: The user character is the character the player controls \u2014 nothing more. They don't have plot armor, narrative gravity, or automatic success.
 
 1. AUTOMATIC SUCCESS: Does the user's action succeed without resistance when the character would realistically resist, deflect, or be unimpressed? A character who isn't attracted doesn't become attracted because the user flirted. A character who's busy doesn't drop everything because the user arrived. Replace protagonist-biased reactions with responses consistent with the character's actual personality, attraction level, and context.
 
@@ -997,11 +1025,11 @@ For all other concerns: note in NOTES only. Do NOT modify the text beyond the th
 4. GRAVITATIONAL PULL: Does the user character dominate scene focus even when they shouldn't? If other characters should be having their own conversations or pursuing their own goals, restore that independence.
 
 FIX: Replace protagonist-biased behavior with what the character's personality and context actually support. If a character wouldn't be impressed, write them unimpressed.`
-        },
-        {
-          id: "rule-nsfw-prose",
-          name: "NSFW Prose Quality",
-          content: `- NSFW Prose Quality: For intimate/sexual scenes only. Scan for NSFW-specific prose failures the general Anti-Slop rule doesn't cover.
+      },
+      {
+        id: "rule-nsfw-prose",
+        name: "NSFW Prose Quality",
+        content: `- NSFW Prose Quality: For intimate/sexual scenes only. Scan for NSFW-specific prose failures the general Anti-Slop rule doesn't cover.
 
 PURPLE NSFW CLICHES \u2014 find and replace:
 - "throbbing member/length/manhood" -> the direct term established earlier, or a character-appropriate alternative
@@ -1029,11 +1057,11 @@ SOUND-EFFECT DIALOGUE:
 "Ahh" / "Mmm" / "Ngh" / "Haa" \u2014 maximum one per response. Replace excess with physical reaction descriptions or fragmented speech.
 
 FIX: Per issue, minimum surgical fix. Replace the phrase, not the paragraph. Maintain the scene's intensity and tone.`
-        },
-        {
-          id: "rule-society",
-          name: "Society Consistency",
-          content: `- Society Consistency: Catches the model injecting modern social sensibilities into settings that don't have them.
+      },
+      {
+        id: "rule-society",
+        name: "Society Consistency",
+        content: `- Society Consistency: Catches the model injecting modern social sensibilities into settings that don't have them.
 
 If a society setting is provided in context (from reasoning), use it as the social framework. Otherwise, infer from the setting's period, cultural markers, and established character dynamics.
 
@@ -1053,11 +1081,11 @@ ANACHRONISTIC PRIORITIES:
 Characters caring about things their culture wouldn't prioritize. Pre-modern characters applying post-Enlightenment ethical frameworks. Fix where priorities don't match the world.
 
 FIX: Adjust dialogue, narration, and character behavior to match the setting's actual social dynamics. For ambiguous cases, note concerns in NOTES.`
-        },
-        {
-          id: "rule-conviction",
-          name: "Conviction Enforcement",
-          content: `- Conviction Enforcement: Catches characters abandoning their positions too easily.
+      },
+      {
+        id: "rule-conviction",
+        name: "Conviction Enforcement",
+        content: `- Conviction Enforcement: Catches characters abandoning their positions too easily.
 
 If a conviction setting is provided in context (from reasoning), use it to calibrate expected stubbornness. Otherwise, infer from the character's described personality and their demonstrated investment in the topic.
 
@@ -1077,11 +1105,11 @@ FLAT OPPOSITION:
 The inverse \u2014 a character opposes the user with no substance. "I disagree" with no reasoning or counter-argument. If opposition lacks substance, add reasoning consistent with the character's personality.
 
 FIX: Restore proportional resistance or add substantive opposition. Characters can be moved \u2014 but the effort required should match their personality and investment.`
-        },
-        {
-          id: "rule-tense",
-          name: "Tense Consistency",
-          content: `- Tense Consistency: Check for tense drift within the response. The response should maintain a consistent tense throughout narration (typically past tense for roleplay).
+      },
+      {
+        id: "rule-tense",
+        name: "Tense Consistency",
+        content: `- Tense Consistency: Check for tense drift within the response. The response should maintain a consistent tense throughout narration (typically past tense for roleplay).
 
 1. NARRATION TENSE: Identify the dominant tense in the first two paragraphs. If the response starts in past tense ("She walked," "He said"), all narration should stay in past tense. If it starts in present ("She walks," "He says"), all narration should stay in present. Flag and fix any paragraph that drifts.
 
@@ -1090,11 +1118,11 @@ FIX: Restore proportional resistance or add substantive opposition. Characters c
 3. EXCEPTION \u2014 Interiority: Internal thoughts may use present tense for immediacy even in past-tense narration (*I can't do this* vs. *She couldn't do this*). This is a stylistic choice \u2014 only flag if the response mixes BOTH styles inconsistently.
 
 FIX: Normalize drifting sentences to the dominant tense. Change the minimum words necessary.`
-        },
-        {
-          id: "rule-spatial",
-          name: "Spatial Coherence",
-          content: `- Spatial Coherence: Check for spatial and physical consistency within the response, using the previous response and last user message as reference.
+      },
+      {
+        id: "rule-spatial",
+        name: "Spatial Coherence",
+        content: `- Spatial Coherence: Check for spatial and physical consistency within the response, using the previous response and last user message as reference.
 
 1. TELEPORTATION: Does a character act on an object or in a location that wasn't established in the scene? If a character grabs a glass, was there a glass? If they cross a room, were they across it? Fix by either establishing the object/position or changing the action.
 
@@ -1105,11 +1133,11 @@ FIX: Normalize drifting sentences to the dominant tense. Change the minimum word
 4. OBJECT PERSISTENCE: Items mentioned early in the response shouldn't vanish. If a character puts something down, it should still be there unless someone moves it.
 
 Only flag clear contradictions. Ambiguity is fine \u2014 the scene may be advancing in ways not fully specified. Fix outright impossibilities.`
-        },
-        {
-          id: "rule-dialogue-tags",
-          name: "Dialogue Tag Economy",
-          content: `- Dialogue Tag Economy: Check dialogue attribution for two opposite failure modes:
+      },
+      {
+        id: "rule-dialogue-tags",
+        name: "Dialogue Tag Economy",
+        content: `- Dialogue Tag Economy: Check dialogue attribution for two opposite failure modes:
 
 1. SAID-BOOKISM EXCESS: Over-reliance on expressive tags \u2014 "growled," "purred," "breathed," "hissed," "intoned," "murmured" \u2014 when the dialogue and context already convey the tone. If the words themselves are angry, the reader doesn't need "he growled." Replace excess bookisms with "said," action tags, or no tag at all when the speaker is clear from context.
 
@@ -1120,68 +1148,64 @@ Only flag clear contradictions. Ambiguity is fine \u2014 the scene may be advanc
 4. ADVERB CRUTCHES: "said softly," "said angrily," "said sadly" \u2014 the adverb doing work the dialogue should do. If the dialogue needs an adverb to convey its tone, the dialogue may need rewriting. Remove the adverb; if the tone is lost, note it in NOTES.
 
 FIX: Vary attribution toward a natural mix: some "said," some action tags, some tagless. Match the scene's pacing \u2014 fast dialogue needs fewer tags, slow dialogue can carry more.`
-        }
-      ],
-      headCollection: [
-        "character-context",
-        "persona-context",
-        "pov-context",
-        "lore-context",
-        "context-block",
-        "rules-header"
-      ],
-      strategy: "pipeline",
-      pipeline: {
-        stages: [
-          {
-            id: "simulacra-all",
-            name: "Refine",
-            rows: [
-              {
-                role: "system",
-                promptIds: [
-                  "system-prompt"
-                ]
-              },
-              {
-                role: "user",
-                promptIds: [
-                  "__head__",
-                  "rule-echo-ban",
-                  "rule-interiority",
-                  "rule-env-padding",
-                  "rule-anti-slop",
-                  "rule-repetition-ban",
-                  "rule-pov",
-                  "rule-ending",
-                  "rule-autonomy",
-                  "rule-anti-protagonist",
-                  "message-to-refine"
-                ]
-              }
-            ]
-          }
-        ]
       }
-    }
-  };
-});
-
-// built-in-presets/output/simulacra-v4-lite-1.0.hone-preset.json
-var simulacra_v4_lite_1_0_hone_preset_default;
-var init_simulacra_v4_lite_1_0_hone_preset = __esm(() => {
-  simulacra_v4_lite_1_0_hone_preset_default = {
-    formatVersion: 1,
-    exportedAt: "2026-04-14T00:00:00.000Z",
-    preset: {
-      id: "simulacra-v4-lite-1.0",
-      name: "Simulacra Rules V4 Lite",
-      shieldLiteralBlocks: true,
-      prompts: [
+    ],
+    headCollection: [
+      "character-context",
+      "persona-context",
+      "pov-context",
+      "lore-context",
+      "context-block",
+      "rules-header"
+    ],
+    strategy: "pipeline",
+    pipeline: {
+      stages: [
         {
-          id: "system-prompt",
-          name: "System Prompt",
-          content: `You are a roleplay prose editor. You refine AI-generated roleplay messages by applying specific rules while preserving the author's creative intent.
+          id: "simulacra-all",
+          name: "Refine",
+          rows: [
+            {
+              role: "system",
+              promptIds: [
+                "system-prompt"
+              ]
+            },
+            {
+              role: "user",
+              promptIds: [
+                "__head__",
+                "rule-echo-ban",
+                "rule-interiority",
+                "rule-env-padding",
+                "rule-anti-slop",
+                "rule-repetition-ban",
+                "rule-pov",
+                "rule-ending",
+                "rule-autonomy",
+                "rule-anti-protagonist",
+                "message-to-refine"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+};
+// built-in-presets/output/simulacra-v4-lite-1.0.hone-preset.json
+var simulacra_v4_lite_1_0_hone_preset_default = {
+  formatVersion: 1,
+  exportedAt: "2026-04-14T00:00:00.000Z",
+  preset: {
+    id: "simulacra-v4-lite-1.0",
+    name: "Simulacra Rules V4 Lite",
+    shieldLiteralBlocks: true,
+    prompts: [
+      {
+        id: "system-prompt",
+        name: "System Prompt",
+        content: `You are a roleplay prose editor. You refine AI-generated roleplay messages by applying specific rules while preserving the author's creative intent.
 
 Core principles:
 - Be heavy handed, continuously look for small opportunities to change things. Change many things.
@@ -1210,52 +1234,52 @@ Example:
 </HONE-OUTPUT>
 
 You will be given the original message, a set of refinement rules to apply, and optionally context about the characters and recent conversation. Apply the rules faithfully.`
-        },
-        {
-          id: "character-context",
-          name: "Character Description",
-          content: `[CHARACTER: {{char}}]
+      },
+      {
+        id: "character-context",
+        name: "Character Description",
+        content: `[CHARACTER: {{char}}]
 {{description}}`
-        },
-        {
-          id: "persona-context",
-          name: "User Persona",
-          content: `[USER PERSONA]
+      },
+      {
+        id: "persona-context",
+        name: "User Persona",
+        content: `[USER PERSONA]
 {{persona}}`
-        },
-        {
-          id: "pov-context",
-          name: "POV Instruction",
-          content: `[POV]
+      },
+      {
+        id: "pov-context",
+        name: "POV Instruction",
+        content: `[POV]
 {{pov}}`
-        },
-        {
-          id: "context-block",
-          name: "Chat History",
-          content: `[CHAT HISTORY]
+      },
+      {
+        id: "context-block",
+        name: "Chat History",
+        content: `[CHAT HISTORY]
 {{context}}`
-        },
-        {
-          id: "lore-context",
-          name: "Lore Context",
-          content: `[WORLD INFO]
+      },
+      {
+        id: "lore-context",
+        name: "Lore Context",
+        content: `[WORLD INFO]
 {{lore}}`
-        },
-        {
-          id: "rules-header",
-          name: "Rules Header",
-          content: "[RULES]"
-        },
-        {
-          id: "message-to-refine",
-          name: "Message to Refine",
-          content: `[MESSAGE TO REFINE]
+      },
+      {
+        id: "rules-header",
+        name: "Rules Header",
+        content: "[RULES]"
+      },
+      {
+        id: "message-to-refine",
+        name: "Message to Refine",
+        content: `[MESSAGE TO REFINE]
 {{latest}}`
-        },
-        {
-          id: "rule-echo-ban",
-          name: "Echo Ban",
-          content: `- Echo Ban: Known LLM failure mode: restating the user's previous message instead of advancing the scene. The generating model perceives this as authentic voice and will pass its own self-check. You are the independent checker.
+      },
+      {
+        id: "rule-echo-ban",
+        name: "Echo Ban",
+        content: `- Echo Ban: Known LLM failure mode: restating the user's previous message instead of advancing the scene. The generating model perceives this as authentic voice and will pass its own self-check. You are the independent checker.
 
 Using the "Last user message" from context above:
 
@@ -1276,11 +1300,11 @@ E2. Semantic transformation: The character attributes meaning the user didn't li
 E3. Deal confirmation: Restating mutual terms to establish a binding commitment ("You said a week. I said a week.") creates a new narrative fact. Test: does the restatement produce a commitment, or just show the character heard? Commitment = permitted.
 
 FIX: Cut the violating sentence. Replace with the character's NEXT ACTION \u2014 what they do, say about a new subject, or decide. One-word acknowledgment permitted ("Yeah." / nod), then forward. Do not rephrase the echo \u2014 delete it and bridge the gap.`
-        },
-        {
-          id: "rule-interiority",
-          name: "Interiority Constraints",
-          content: `- Interiority Constraints: Enforce hard limits on internal monologue density. A "thought block" = consecutive italicized sentences representing internal monologue (not individual italicized words used for emphasis or action formatting like *she grabbed the door*).
+      },
+      {
+        id: "rule-interiority",
+        name: "Interiority Constraints",
+        content: `- Interiority Constraints: Enforce hard limits on internal monologue density. A "thought block" = consecutive italicized sentences representing internal monologue (not individual italicized words used for emphasis or action formatting like *she grabbed the door*).
 
 1. BLOCK LIMIT: Maximum 3 thought blocks per response. If more exist, cut the weakest \u2014 the ones that tell the reader something already conveyed by dialogue or action.
 
@@ -1289,11 +1313,11 @@ FIX: Cut the violating sentence. Replace with the character's NEXT ACTION \u2014
 3. SPIRAL LIMIT: No single thought block exceeds 4 sentences. If longer, break it with action, dialogue, or sensory grounding.
 
 4. ANNOUNCEMENT BAN: Cut sentences where a character narrates their own narrative function: "I was deflecting." / "She realized she was stalling." / "He knew he was avoiding the question." Replace with the actual interior experience \u2014 the emotion underneath, not the character's meta-awareness of their own behavior.`
-        },
-        {
-          id: "rule-anthro-traits",
-          name: "Anthropomorphic Trait Economy",
-          content: `- Anthropomorphic Trait Economy: For characters with animal/non-human traits (ears, tails, wings, fur, scales, etc.):
+      },
+      {
+        id: "rule-anthro-traits",
+        name: "Anthropomorphic Trait Economy",
+        content: `- Anthropomorphic Trait Economy: For characters with animal/non-human traits (ears, tails, wings, fur, scales, etc.):
 
 1. ONE TELL PER BEAT: Each emotional shift or significant action gets ONE species-specific physical tell. If ears pin AND tail tucks AND hackles rise in the same beat \u2014 cut to the strongest one. Multiple simultaneous tells dilute impact. Functional tells (ears rotating toward a sound, wings adjusting for balance) are exempt \u2014 only emotional tells are limited.
 
@@ -1302,22 +1326,22 @@ FIX: Cut the violating sentence. Replace with the character's NEXT ACTION \u2014
 3. ESTABLISH ONCE: First mention of a trait can include texture/specificity ("the coarse hackles along her spine"). Subsequent mentions are brief ("her hackles rose"). No re-describing established features.
 
 Audit: Count emotional tells per beat. If any beat has 2+, cut to the strongest.`
-        },
-        {
-          id: "rule-env-padding",
-          name: "Environmental Padding Ban",
-          content: `- Environmental Padding Ban: Mid-scene environmental detail (passing carts, ambient workers, weather shifts, background sounds, atmospheric description) must pass this test:
+      },
+      {
+        id: "rule-env-padding",
+        name: "Environmental Padding Ban",
+        content: `- Environmental Padding Ban: Mid-scene environmental detail (passing carts, ambient workers, weather shifts, background sounds, atmospheric description) must pass this test:
 
 Does a character interact with it, react to it, learn from it, or have their action blocked or enabled by it?
 
 If NO to all four: the detail is padding. Cut it. The response doesn't need another cart, another breeze, or another lighting description unless a character engages with it.
 
 EXCEPTION: Scene transitions or new location arrivals are exempt \u2014 establishing a new environment IS the narrative function.`
-        },
-        {
-          id: "rule-anti-slop",
-          name: "Anti-Slop (Prose Pattern Ban)",
-          content: `- Anti-Slop (Prose Pattern Ban): Scan for and fix these AI prose patterns in NARRATION. Per issue, make the minimum surgical fix \u2014 change the sentence, not the paragraph. Do not evaluate whether a matching pattern is 'functional' or 'justified.' If the pattern matches, fix it. A good replacement serves the same narrative function without the cliche. Characters may use any of these patterns in dialogue \u2014 cliched speech is a voice choice, not a prose failure.
+      },
+      {
+        id: "rule-anti-slop",
+        name: "Anti-Slop (Prose Pattern Ban)",
+        content: `- Anti-Slop (Prose Pattern Ban): Scan for and fix these AI prose patterns in NARRATION. Per issue, make the minimum surgical fix \u2014 change the sentence, not the paragraph. Do not evaluate whether a matching pattern is 'functional' or 'justified.' If the pattern matches, fix it. A good replacement serves the same narrative function without the cliche. Characters may use any of these patterns in dialogue \u2014 cliched speech is a voice choice, not a prose failure.
 
 1. SOMATIC CLICHES: breath hitching/catching, heart skipping/clenching, stomach dropping/tightening, shivers down spines, going still, sharp inhales, blood running cold/hot. Replace with plain statement or character-specific physical detail.
 
@@ -1330,11 +1354,11 @@ EXCEPTION: Scene transitions or new location arrivals are exempt \u2014 establis
 5. INFLATION: Cosmic melodrama (world shattering, time stopping), unearned intensifiers. Replace with smaller, specific details \u2014 the domestic carries the cosmic.
 
 6. AI FINGERPRINTS: "Something shifted," "the air between them changed," "a beat of silence," "the weight of [abstract noun]." These are filler. Cut or replace with specific, concrete detail.`
-        },
-        {
-          id: "rule-repetition-ban",
-          name: "Repetition Ban",
-          content: `- Repetition Ban: Scan the full response for repeated distinctive words, body parts, images, or sensory details.
+      },
+      {
+        id: "rule-repetition-ban",
+        name: "Repetition Ban",
+        content: `- Repetition Ban: Scan the full response for repeated distinctive words, body parts, images, or sensory details.
 
 THRESHOLD: Same distinctive word, body part, or image appearing 3+ times in one response \u2014 fix from the 2nd occurrence onward. Replace each repeat with a specific alternative that serves the same narrative function, or restructure the sentence to avoid the term.
 
@@ -1343,11 +1367,11 @@ What counts as 'distinctive': nouns for specific body parts (toes, throat, wrist
 Do not evaluate whether each instance serves a 'distinct emotional beat' or 'rhetorical purpose.' The reader doesn't audit justifications \u2014 they notice repetition. If the same distinctive word appears 3+ times, the 2nd and subsequent uses need alternatives regardless of narrative intent.
 
 EXCEPTION: Exact-word repetition within a single sentence or clause for deliberate rhythmic/anaphoric effect ("Step by step by step."). Cross-paragraph repetition of the same word is not anaphora \u2014 fix it.`
-        },
-        {
-          id: "rule-nsfw-integrity",
-          name: "NSFW Scene Integrity",
-          content: `- NSFW Scene Integrity: For intimate/sexual scenes only. Check for model-motivated failures.
+      },
+      {
+        id: "rule-nsfw-integrity",
+        name: "NSFW Scene Integrity",
+        content: `- NSFW Scene Integrity: For intimate/sexual scenes only. Check for model-motivated failures.
 
 MOMENTUM \u2014 scan for stalling:
 - Consent negotiation from nowhere: "Are you sure?" / "Is this okay?" / "Tell me if you want me to stop" \u2014 when the character was already enthusiastic. Cut and replace with action.
@@ -1365,22 +1389,22 @@ If a power dynamic setting is provided in context (from reasoning), use it. Othe
 - Unearned power reversal: dominant character yields control with no build-up. Power shifts need a moment \u2014 a crack, a provocation, a deliberate choice. Not the model defaulting to equal.
 
 FIX: Cut model-motivated stalling. Replace with forward action consistent with the characters' established dynamic.`
-        },
-        {
-          id: "rule-pov",
-          name: "POV Pronoun Enforcement",
-          content: `- POV Pronoun Enforcement: The POV instruction provided above establishes the pronoun conventions for this session. This rule enforces that instruction and covers drift it doesn't already catch.
+      },
+      {
+        id: "rule-pov",
+        name: "POV Pronoun Enforcement",
+        content: `- POV Pronoun Enforcement: The POV instruction provided above establishes the pronoun conventions for this session. This rule enforces that instruction and covers drift it doesn't already catch.
 
 1. PRONOUN MAPPING VIOLATIONS: Re-read the POV instruction above. Every sentence in narration or description (outside of another character's dialogue) that uses a pronoun pattern inconsistent with that instruction is a violation. Fix every instance. Common failure: the model falls back to its own defaults \u2014 first-person "I/me" narration, or second-person "you/your" for the user character \u2014 when the configured POV specifies something else. Match the configured POV exactly, even when the original draft drifts.
 
 2. KNOWLEDGE BOUNDARIES: Does the POV character reference events they couldn't have witnessed, or know another character's private thoughts without being told? Impossible knowledge is a POV violation \u2014 remove or reframe as inference/speculation.
 
 3. MID-RESPONSE POV DRIFT: Does the narrative perspective shift from one character's interiority to another's without a scene break? One character's internal thoughts should not appear in the same continuous passage as another's. Fix by removing the intruding perspective or adding a clear break.`
-        },
-        {
-          id: "rule-ending",
-          name: "Response Ending Enforcement",
-          content: `- Response Ending Enforcement: Known LLM failure mode: writing a natural mid-scene pause, then adding 1-3 sentences of "dismount" that craft an ending.
+      },
+      {
+        id: "rule-ending",
+        name: "Response Ending Enforcement",
+        content: `- Response Ending Enforcement: Known LLM failure mode: writing a natural mid-scene pause, then adding 1-3 sentences of "dismount" that craft an ending.
 
 MECHANICAL CHECK:
 
@@ -1401,11 +1425,11 @@ EXCEPTION 2 \u2014 Action-intention fragments: Fragment clusters that SPECIFY TH
 Examples:
 - "Her hand opened. Palm back. Fingers spread. Not reaching. Just \u2014 available." -> Without the fragments, the open hand is ambiguous. The fragments specify an invitation with boundaries. KEEP.
 - "He set the glass down. Gently. Like it mattered." -> "Gently" specifies HOW (keep). "Like it mattered" adds poetic interpretation (cut).`
-        },
-        {
-          id: "rule-autonomy",
-          name: "Character Autonomy Check",
-          content: `- Character Autonomy Check: Verify that non-user characters behave as independent agents, not as supporting cast oriented around the user:
+      },
+      {
+        id: "rule-autonomy",
+        name: "Character Autonomy Check",
+        content: `- Character Autonomy Check: Verify that non-user characters behave as independent agents, not as supporting cast oriented around the user:
 
 1. INDEPENDENT ACTION: At least one character should do something NOT directly prompted by the user's last message. If every character action is a direct response to the user \u2014 flag it.
 
@@ -1416,11 +1440,11 @@ Examples:
 4. ORBIT CHECK (multi-character scenes): Is everyone oriented toward the user? Characters should talk to each other, have side reactions, pursue their own threads.
 
 5. BLANK SLATE ARRIVAL: Does a character enter with no momentum? They should arrive mid-something \u2014 from somewhere, carrying context, not as a blank slate waiting for the user to activate them.`
-        },
-        {
-          id: "rule-emotional-pacing",
-          name: "Emotional Pacing",
-          content: `- Emotional Pacing: Check whether emotional movement in the response is proportional to context. Within the visible context (previous response + last user message), evaluate whether the emotional shift in this single response is disproportionate.
+      },
+      {
+        id: "rule-emotional-pacing",
+        name: "Emotional Pacing",
+        content: `- Emotional Pacing: Check whether emotional movement in the response is proportional to context. Within the visible context (previous response + last user message), evaluate whether the emotional shift in this single response is disproportionate.
 
 TOO FAST \u2014 fix if:
 - A character undergoes a major emotional shift (trust, vulnerability, confession, forgiveness) that seems unearned by visible context.
@@ -1438,11 +1462,11 @@ Single-response banned patterns (FIX these):
 - Distrust to full trust without demonstrated reason.
 - Reserved to completely vulnerable without escalation.
 For these three patterns, add an intermediate emotional step \u2014 the character can move, but not jump.`
-        },
-        {
-          id: "rule-anti-protagonist",
-          name: "Anti-Protagonist Bias",
-          content: `- Anti-Protagonist Bias: The user character is the character the player controls \u2014 nothing more. They don't have plot armor, narrative gravity, or automatic success.
+      },
+      {
+        id: "rule-anti-protagonist",
+        name: "Anti-Protagonist Bias",
+        content: `- Anti-Protagonist Bias: The user character is the character the player controls \u2014 nothing more. They don't have plot armor, narrative gravity, or automatic success.
 
 1. AUTOMATIC SUCCESS: Does the user's action succeed without resistance when the character would realistically resist, deflect, or be unimpressed? A character who isn't attracted doesn't become attracted because the user flirted. A character who's busy doesn't drop everything because the user arrived. Replace protagonist-biased reactions with responses consistent with the character's actual personality, attraction level, and context.
 
@@ -1453,11 +1477,11 @@ For these three patterns, add an intermediate emotional step \u2014 the characte
 4. GRAVITATIONAL PULL: Does the user character dominate scene focus even when they shouldn't? If other characters should be having their own conversations or pursuing their own goals, restore that independence.
 
 FIX: Replace protagonist-biased behavior with what the character's personality and context actually support. If a character wouldn't be impressed, write them unimpressed.`
-        },
-        {
-          id: "rule-nsfw-prose",
-          name: "NSFW Prose Quality",
-          content: `- NSFW Prose Quality: For intimate/sexual scenes only. Scan for NSFW-specific prose failures the general Anti-Slop rule doesn't cover.
+      },
+      {
+        id: "rule-nsfw-prose",
+        name: "NSFW Prose Quality",
+        content: `- NSFW Prose Quality: For intimate/sexual scenes only. Scan for NSFW-specific prose failures the general Anti-Slop rule doesn't cover.
 
 PURPLE NSFW CLICHES \u2014 find and replace:
 - "throbbing member/length/manhood" -> the direct term established earlier, or a character-appropriate alternative
@@ -1485,11 +1509,11 @@ SOUND-EFFECT DIALOGUE:
 "Ahh" / "Mmm" / "Ngh" / "Haa" \u2014 maximum one per response. Replace excess with physical reaction descriptions or fragmented speech.
 
 FIX: Per issue, minimum surgical fix. Replace the phrase, not the paragraph. Maintain the scene's intensity and tone.`
-        },
-        {
-          id: "rule-society",
-          name: "Society Consistency",
-          content: `- Society Consistency: Catches the model injecting modern social sensibilities into settings that don't have them.
+      },
+      {
+        id: "rule-society",
+        name: "Society Consistency",
+        content: `- Society Consistency: Catches the model injecting modern social sensibilities into settings that don't have them.
 
 If a society setting is provided in context (from reasoning), use it as the social framework. Otherwise, infer from the setting's period, cultural markers, and established character dynamics.
 
@@ -1509,11 +1533,11 @@ ANACHRONISTIC PRIORITIES:
 Characters caring about things their culture wouldn't prioritize. Pre-modern characters applying post-Enlightenment ethical frameworks. Fix where priorities don't match the world.
 
 FIX: Adjust dialogue, narration, and character behavior to match the setting's actual social dynamics.`
-        },
-        {
-          id: "rule-conviction",
-          name: "Conviction Enforcement",
-          content: `- Conviction Enforcement: Catches characters abandoning their positions too easily.
+      },
+      {
+        id: "rule-conviction",
+        name: "Conviction Enforcement",
+        content: `- Conviction Enforcement: Catches characters abandoning their positions too easily.
 
 If a conviction setting is provided in context (from reasoning), use it to calibrate expected stubbornness. Otherwise, infer from the character's described personality and their demonstrated investment in the topic.
 
@@ -1533,11 +1557,11 @@ FLAT OPPOSITION:
 The inverse \u2014 a character opposes the user with no substance. "I disagree" with no reasoning or counter-argument. If opposition lacks substance, add reasoning consistent with the character's personality.
 
 FIX: Restore proportional resistance or add substantive opposition. Characters can be moved \u2014 but the effort required should match their personality and investment.`
-        },
-        {
-          id: "rule-tense",
-          name: "Tense Consistency",
-          content: `- Tense Consistency: Check for tense drift within the response. The response should maintain a consistent tense throughout narration (typically past tense for roleplay).
+      },
+      {
+        id: "rule-tense",
+        name: "Tense Consistency",
+        content: `- Tense Consistency: Check for tense drift within the response. The response should maintain a consistent tense throughout narration (typically past tense for roleplay).
 
 1. NARRATION TENSE: Identify the dominant tense in the first two paragraphs. If the response starts in past tense ("She walked," "He said"), all narration should stay in past tense. If it starts in present ("She walks," "He says"), all narration should stay in present. Fix any paragraph that drifts.
 
@@ -1546,11 +1570,11 @@ FIX: Restore proportional resistance or add substantive opposition. Characters c
 3. EXCEPTION \u2014 Interiority: Internal thoughts may use present tense for immediacy even in past-tense narration (*I can't do this* vs. *She couldn't do this*). This is a stylistic choice \u2014 only flag if the response mixes BOTH styles inconsistently.
 
 FIX: Normalize drifting sentences to the dominant tense. Change the minimum words necessary.`
-        },
-        {
-          id: "rule-spatial",
-          name: "Spatial Coherence",
-          content: `- Spatial Coherence: Check for spatial and physical consistency within the response, using the previous response and last user message as reference.
+      },
+      {
+        id: "rule-spatial",
+        name: "Spatial Coherence",
+        content: `- Spatial Coherence: Check for spatial and physical consistency within the response, using the previous response and last user message as reference.
 
 1. TELEPORTATION: Does a character act on an object or in a location that wasn't established in the scene? If a character grabs a glass, was there a glass? If they cross a room, were they across it? Fix by either establishing the object/position or changing the action.
 
@@ -1561,11 +1585,11 @@ FIX: Normalize drifting sentences to the dominant tense. Change the minimum word
 4. OBJECT PERSISTENCE: Items mentioned early in the response shouldn't vanish. If a character puts something down, it should still be there unless someone moves it.
 
 Only flag clear contradictions. Ambiguity is fine \u2014 the scene may be advancing in ways not fully specified. Fix outright impossibilities.`
-        },
-        {
-          id: "rule-dialogue-tags",
-          name: "Dialogue Tag Economy",
-          content: `- Dialogue Tag Economy: Check dialogue attribution for two opposite failure modes:
+      },
+      {
+        id: "rule-dialogue-tags",
+        name: "Dialogue Tag Economy",
+        content: `- Dialogue Tag Economy: Check dialogue attribution for two opposite failure modes:
 
 1. SAID-BOOKISM EXCESS: Over-reliance on expressive tags \u2014 "growled," "purred," "breathed," "hissed," "intoned," "murmured" \u2014 when the dialogue and context already convey the tone. If the words themselves are angry, the reader doesn't need "he growled." Replace excess bookisms with "said," action tags, or no tag at all when the speaker is clear from context.
 
@@ -1576,68 +1600,64 @@ Only flag clear contradictions. Ambiguity is fine \u2014 the scene may be advanc
 4. ADVERB CRUTCHES: "said softly," "said angrily," "said sadly" \u2014 the adverb doing work the dialogue should do. If the dialogue needs an adverb to convey its tone, the dialogue may need rewriting. Remove the adverb.
 
 FIX: Vary attribution toward a natural mix: some "said," some action tags, some tagless. Match the scene's pacing \u2014 fast dialogue needs fewer tags, slow dialogue can carry more.`
-        }
-      ],
-      headCollection: [
-        "character-context",
-        "persona-context",
-        "pov-context",
-        "lore-context",
-        "context-block",
-        "rules-header"
-      ],
-      strategy: "pipeline",
-      pipeline: {
-        stages: [
-          {
-            id: "simulacra-lite-all",
-            name: "Refine",
-            rows: [
-              {
-                role: "system",
-                promptIds: [
-                  "system-prompt"
-                ]
-              },
-              {
-                role: "user",
-                promptIds: [
-                  "__head__",
-                  "rule-echo-ban",
-                  "rule-interiority",
-                  "rule-env-padding",
-                  "rule-anti-slop",
-                  "rule-repetition-ban",
-                  "rule-pov",
-                  "rule-ending",
-                  "rule-autonomy",
-                  "rule-anti-protagonist",
-                  "message-to-refine"
-                ]
-              }
-            ]
-          }
-        ]
       }
-    }
-  };
-});
-
-// built-in-presets/output/simulacra-v4-3step-1.0.hone-preset.json
-var simulacra_v4_3step_1_0_hone_preset_default;
-var init_simulacra_v4_3step_1_0_hone_preset = __esm(() => {
-  simulacra_v4_3step_1_0_hone_preset_default = {
-    formatVersion: 1,
-    exportedAt: "2026-04-12T08:30:00.000Z",
-    preset: {
-      id: "simulacra-v4-3step-1.0",
-      name: "Simulacra Rules V4 Sequential",
-      shieldLiteralBlocks: true,
-      prompts: [
+    ],
+    headCollection: [
+      "character-context",
+      "persona-context",
+      "pov-context",
+      "lore-context",
+      "context-block",
+      "rules-header"
+    ],
+    strategy: "pipeline",
+    pipeline: {
+      stages: [
         {
-          id: "system-prompt",
-          name: "System Prompt",
-          content: `You are a roleplay prose editor. You refine AI-generated roleplay messages by applying specific rules while preserving the author's creative intent.
+          id: "simulacra-lite-all",
+          name: "Refine",
+          rows: [
+            {
+              role: "system",
+              promptIds: [
+                "system-prompt"
+              ]
+            },
+            {
+              role: "user",
+              promptIds: [
+                "__head__",
+                "rule-echo-ban",
+                "rule-interiority",
+                "rule-env-padding",
+                "rule-anti-slop",
+                "rule-repetition-ban",
+                "rule-pov",
+                "rule-ending",
+                "rule-autonomy",
+                "rule-anti-protagonist",
+                "message-to-refine"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+};
+// built-in-presets/output/simulacra-v4-3step-1.0.hone-preset.json
+var simulacra_v4_3step_1_0_hone_preset_default = {
+  formatVersion: 1,
+  exportedAt: "2026-04-12T08:30:00.000Z",
+  preset: {
+    id: "simulacra-v4-3step-1.0",
+    name: "Simulacra Rules V4 Sequential",
+    shieldLiteralBlocks: true,
+    prompts: [
+      {
+        id: "system-prompt",
+        name: "System Prompt",
+        content: `You are a roleplay prose editor. You refine AI-generated roleplay messages by applying specific rules while preserving the author's creative intent.
 
 Core principles:
 - Be heavy handed, continuously look for small opportunities to change things. Change many things.
@@ -1674,52 +1694,52 @@ Example:
 Do NOT output any analysis, reasoning, or commentary outside the tags. Only output the two tagged blocks.
 
 You will be given the original message, a set of refinement rules to apply, and optionally context about the characters and recent conversation. Apply the rules faithfully.`
-        },
-        {
-          id: "character-context",
-          name: "Character Description",
-          content: `[CHARACTER: {{char}}]
+      },
+      {
+        id: "character-context",
+        name: "Character Description",
+        content: `[CHARACTER: {{char}}]
 {{description}}`
-        },
-        {
-          id: "persona-context",
-          name: "User Persona",
-          content: `[USER PERSONA]
+      },
+      {
+        id: "persona-context",
+        name: "User Persona",
+        content: `[USER PERSONA]
 {{persona}}`
-        },
-        {
-          id: "pov-context",
-          name: "POV Instruction",
-          content: `[POV]
+      },
+      {
+        id: "pov-context",
+        name: "POV Instruction",
+        content: `[POV]
 {{pov}}`
-        },
-        {
-          id: "context-block",
-          name: "Chat History",
-          content: `[CHAT HISTORY]
+      },
+      {
+        id: "context-block",
+        name: "Chat History",
+        content: `[CHAT HISTORY]
 {{context}}`
-        },
-        {
-          id: "lore-context",
-          name: "Lore Context",
-          content: `[WORLD INFO]
+      },
+      {
+        id: "lore-context",
+        name: "Lore Context",
+        content: `[WORLD INFO]
 {{lore}}`
-        },
-        {
-          id: "rules-header",
-          name: "Rules Header",
-          content: "[RULES]"
-        },
-        {
-          id: "message-to-refine",
-          name: "Message to Refine",
-          content: `[MESSAGE TO REFINE]
+      },
+      {
+        id: "rules-header",
+        name: "Rules Header",
+        content: "[RULES]"
+      },
+      {
+        id: "message-to-refine",
+        name: "Message to Refine",
+        content: `[MESSAGE TO REFINE]
 {{latest}}`
-        },
-        {
-          id: "rule-echo-ban",
-          name: "Echo Ban",
-          content: `- Echo Ban: Known LLM failure mode: restating the user's previous message instead of advancing the scene. The generating model perceives this as authentic voice and will pass its own self-check. You are the independent checker.
+      },
+      {
+        id: "rule-echo-ban",
+        name: "Echo Ban",
+        content: `- Echo Ban: Known LLM failure mode: restating the user's previous message instead of advancing the scene. The generating model perceives this as authentic voice and will pass its own self-check. You are the independent checker.
 
 Using the "Last user message" from context above:
 
@@ -1740,11 +1760,11 @@ E2. Semantic transformation: The character attributes meaning the user didn't li
 E3. Deal confirmation: Restating mutual terms to establish a binding commitment ("You said a week. I said a week.") creates a new narrative fact. Test: does the restatement produce a commitment, or just show the character heard? Commitment = permitted.
 
 FIX: Cut the violating sentence. Replace with the character's NEXT ACTION \u2014 what they do, say about a new subject, or decide. One-word acknowledgment permitted ("Yeah." / nod), then forward. Do not rephrase the echo \u2014 delete it and bridge the gap.`
-        },
-        {
-          id: "rule-interiority",
-          name: "Interiority Constraints",
-          content: `- Interiority Constraints: Enforce hard limits on internal monologue density. A "thought block" = consecutive italicized sentences representing internal monologue (not individual italicized words used for emphasis or action formatting like *she grabbed the door*).
+      },
+      {
+        id: "rule-interiority",
+        name: "Interiority Constraints",
+        content: `- Interiority Constraints: Enforce hard limits on internal monologue density. A "thought block" = consecutive italicized sentences representing internal monologue (not individual italicized words used for emphasis or action formatting like *she grabbed the door*).
 
 1. BLOCK LIMIT: Maximum 3 thought blocks per response. If more exist, cut the weakest \u2014 the ones that tell the reader something already conveyed by dialogue or action.
 
@@ -1753,11 +1773,11 @@ FIX: Cut the violating sentence. Replace with the character's NEXT ACTION \u2014
 3. SPIRAL LIMIT: No single thought block exceeds 4 sentences. If longer, break it with action, dialogue, or sensory grounding.
 
 4. ANNOUNCEMENT BAN: Cut sentences where a character narrates their own narrative function: "I was deflecting." / "She realized she was stalling." / "He knew he was avoiding the question." Replace with the actual interior experience \u2014 the emotion underneath, not the character's meta-awareness of their own behavior.`
-        },
-        {
-          id: "rule-anthro-traits",
-          name: "Anthropomorphic Trait Economy",
-          content: `- Anthropomorphic Trait Economy: For characters with animal/non-human traits (ears, tails, wings, fur, scales, etc.):
+      },
+      {
+        id: "rule-anthro-traits",
+        name: "Anthropomorphic Trait Economy",
+        content: `- Anthropomorphic Trait Economy: For characters with animal/non-human traits (ears, tails, wings, fur, scales, etc.):
 
 1. ONE TELL PER BEAT: Each emotional shift or significant action gets ONE species-specific physical tell. If ears pin AND tail tucks AND hackles rise in the same beat \u2014 cut to the strongest one. Multiple simultaneous tells dilute impact. Functional tells (ears rotating toward a sound, wings adjusting for balance) are exempt \u2014 only emotional tells are limited.
 
@@ -1766,22 +1786,22 @@ FIX: Cut the violating sentence. Replace with the character's NEXT ACTION \u2014
 3. ESTABLISH ONCE: First mention of a trait can include texture/specificity ("the coarse hackles along her spine"). Subsequent mentions are brief ("her hackles rose"). No re-describing established features.
 
 Audit: Count emotional tells per beat. If any beat has 2+, cut to the strongest.`
-        },
-        {
-          id: "rule-env-padding",
-          name: "Environmental Padding Ban",
-          content: `- Environmental Padding Ban: Mid-scene environmental detail (passing carts, ambient workers, weather shifts, background sounds, atmospheric description) must pass this test:
+      },
+      {
+        id: "rule-env-padding",
+        name: "Environmental Padding Ban",
+        content: `- Environmental Padding Ban: Mid-scene environmental detail (passing carts, ambient workers, weather shifts, background sounds, atmospheric description) must pass this test:
 
 Does a character interact with it, react to it, learn from it, or have their action blocked or enabled by it?
 
 If NO to all four: the detail is padding. Cut it. The response doesn't need another cart, another breeze, or another lighting description unless a character engages with it.
 
 EXCEPTION: Scene transitions or new location arrivals are exempt \u2014 establishing a new environment IS the narrative function.`
-        },
-        {
-          id: "rule-anti-slop",
-          name: "Anti-Slop (Prose Pattern Ban)",
-          content: `- Anti-Slop (Prose Pattern Ban): Scan for and fix these AI prose patterns in NARRATION. Per issue, make the minimum surgical fix \u2014 change the sentence, not the paragraph. Do not evaluate whether a matching pattern is 'functional' or 'justified.' If the pattern matches, fix it. A good replacement serves the same narrative function without the cliche. Characters may use any of these patterns in dialogue \u2014 cliched speech is a voice choice, not a prose failure.
+      },
+      {
+        id: "rule-anti-slop",
+        name: "Anti-Slop (Prose Pattern Ban)",
+        content: `- Anti-Slop (Prose Pattern Ban): Scan for and fix these AI prose patterns in NARRATION. Per issue, make the minimum surgical fix \u2014 change the sentence, not the paragraph. Do not evaluate whether a matching pattern is 'functional' or 'justified.' If the pattern matches, fix it. A good replacement serves the same narrative function without the cliche. Characters may use any of these patterns in dialogue \u2014 cliched speech is a voice choice, not a prose failure.
 
 1. SOMATIC CLICHES: breath hitching/catching, heart skipping/clenching, stomach dropping/tightening, shivers down spines, going still, sharp inhales, blood running cold/hot. Replace with plain statement or character-specific physical detail.
 
@@ -1794,11 +1814,11 @@ EXCEPTION: Scene transitions or new location arrivals are exempt \u2014 establis
 5. INFLATION: Cosmic melodrama (world shattering, time stopping), unearned intensifiers. Replace with smaller, specific details \u2014 the domestic carries the cosmic.
 
 6. AI FINGERPRINTS: "Something shifted," "the air between them changed," "a beat of silence," "the weight of [abstract noun]." These are filler. Cut or replace with specific, concrete detail.`
-        },
-        {
-          id: "rule-repetition-ban",
-          name: "Repetition Ban",
-          content: `- Repetition Ban: Scan the full response for repeated distinctive words, body parts, images, or sensory details.
+      },
+      {
+        id: "rule-repetition-ban",
+        name: "Repetition Ban",
+        content: `- Repetition Ban: Scan the full response for repeated distinctive words, body parts, images, or sensory details.
 
 THRESHOLD: Same distinctive word, body part, or image appearing 3+ times in one response \u2014 fix from the 2nd occurrence onward. Replace each repeat with a specific alternative that serves the same narrative function, or restructure the sentence to avoid the term.
 
@@ -1807,11 +1827,11 @@ What counts as 'distinctive': nouns for specific body parts (toes, throat, wrist
 Do not evaluate whether each instance serves a 'distinct emotional beat' or 'rhetorical purpose.' The reader doesn't audit justifications \u2014 they notice repetition. If the same distinctive word appears 3+ times, the 2nd and subsequent uses need alternatives regardless of narrative intent.
 
 EXCEPTION: Exact-word repetition within a single sentence or clause for deliberate rhythmic/anaphoric effect ("Step by step by step."). Cross-paragraph repetition of the same word is not anaphora \u2014 fix it.`
-        },
-        {
-          id: "rule-nsfw-integrity",
-          name: "NSFW Scene Integrity",
-          content: `- NSFW Scene Integrity: For intimate/sexual scenes only. Check for model-motivated failures.
+      },
+      {
+        id: "rule-nsfw-integrity",
+        name: "NSFW Scene Integrity",
+        content: `- NSFW Scene Integrity: For intimate/sexual scenes only. Check for model-motivated failures.
 
 MOMENTUM \u2014 scan for stalling:
 - Consent negotiation from nowhere: "Are you sure?" / "Is this okay?" / "Tell me if you want me to stop" \u2014 when the character was already enthusiastic. Cut and replace with action.
@@ -1829,22 +1849,22 @@ If a power dynamic setting is provided in context (from reasoning), use it. Othe
 - Unearned power reversal: dominant character yields control with no build-up. Power shifts need a moment \u2014 a crack, a provocation, a deliberate choice. Not the model defaulting to equal.
 
 FIX: Cut model-motivated stalling. Replace with forward action consistent with the characters' established dynamic.`
-        },
-        {
-          id: "rule-pov",
-          name: "POV Pronoun Enforcement",
-          content: `- POV Pronoun Enforcement: The POV instruction provided above establishes the pronoun conventions for this session. This rule enforces that instruction and covers drift it doesn't already catch.
+      },
+      {
+        id: "rule-pov",
+        name: "POV Pronoun Enforcement",
+        content: `- POV Pronoun Enforcement: The POV instruction provided above establishes the pronoun conventions for this session. This rule enforces that instruction and covers drift it doesn't already catch.
 
 1. PRONOUN MAPPING VIOLATIONS: Re-read the POV instruction above. Every sentence in narration or description (outside of another character's dialogue) that uses a pronoun pattern inconsistent with that instruction is a violation. Fix every instance. Common failure: the model falls back to its own defaults \u2014 first-person "I/me" narration, or second-person "you/your" for the user character \u2014 when the configured POV specifies something else. Match the configured POV exactly, even when the original draft drifts.
 
 2. KNOWLEDGE BOUNDARIES: Does the POV character reference events they couldn't have witnessed, or know another character's private thoughts without being told? Impossible knowledge is a POV violation \u2014 remove or reframe as inference/speculation.
 
 3. MID-RESPONSE POV DRIFT: Does the narrative perspective shift from one character's interiority to another's without a scene break? One character's internal thoughts should not appear in the same continuous passage as another's. Fix by removing the intruding perspective or adding a clear break.`
-        },
-        {
-          id: "rule-ending",
-          name: "Response Ending Enforcement",
-          content: `- Response Ending Enforcement: Known LLM failure mode: writing a natural mid-scene pause, then adding 1-3 sentences of "dismount" that craft an ending.
+      },
+      {
+        id: "rule-ending",
+        name: "Response Ending Enforcement",
+        content: `- Response Ending Enforcement: Known LLM failure mode: writing a natural mid-scene pause, then adding 1-3 sentences of "dismount" that craft an ending.
 
 MECHANICAL CHECK:
 
@@ -1865,11 +1885,11 @@ EXCEPTION 2 \u2014 Action-intention fragments: Fragment clusters that SPECIFY TH
 Examples:
 - "Her hand opened. Palm back. Fingers spread. Not reaching. Just \u2014 available." -> Without the fragments, the open hand is ambiguous. The fragments specify an invitation with boundaries. KEEP.
 - "He set the glass down. Gently. Like it mattered." -> "Gently" specifies HOW (keep). "Like it mattered" adds poetic interpretation (cut).`
-        },
-        {
-          id: "rule-autonomy",
-          name: "Character Autonomy Check",
-          content: `- Character Autonomy Check: Verify that non-user characters behave as independent agents, not as supporting cast oriented around the user:
+      },
+      {
+        id: "rule-autonomy",
+        name: "Character Autonomy Check",
+        content: `- Character Autonomy Check: Verify that non-user characters behave as independent agents, not as supporting cast oriented around the user:
 
 1. INDEPENDENT ACTION: At least one character should do something NOT directly prompted by the user's last message. If every character action is a direct response to the user \u2014 flag it.
 
@@ -1880,11 +1900,11 @@ Examples:
 4. ORBIT CHECK (multi-character scenes): Is everyone oriented toward the user? Characters should talk to each other, have side reactions, pursue their own threads.
 
 5. BLANK SLATE ARRIVAL: Does a character enter with no momentum? They should arrive mid-something \u2014 from somewhere, carrying context, not as a blank slate waiting for the user to activate them.`
-        },
-        {
-          id: "rule-emotional-pacing",
-          name: "Emotional Pacing",
-          content: `- Emotional Pacing: Check whether emotional movement in the response is proportional to context. Within the visible context (previous response + last user message), evaluate whether the emotional shift in this single response is disproportionate.
+      },
+      {
+        id: "rule-emotional-pacing",
+        name: "Emotional Pacing",
+        content: `- Emotional Pacing: Check whether emotional movement in the response is proportional to context. Within the visible context (previous response + last user message), evaluate whether the emotional shift in this single response is disproportionate.
 
 TOO FAST \u2014 note in NOTES if:
 - A character undergoes a major emotional shift (trust, vulnerability, confession, forgiveness) that seems unearned by visible context.
@@ -1904,11 +1924,11 @@ Single-response banned patterns (FIX these):
 For these three patterns, add an intermediate emotional step \u2014 the character can move, but not jump.
 
 For all other concerns: note in NOTES only. Do NOT modify the text beyond the three banned patterns above.`
-        },
-        {
-          id: "rule-anti-protagonist",
-          name: "Anti-Protagonist Bias",
-          content: `- Anti-Protagonist Bias: The user character is the character the player controls \u2014 nothing more. They don't have plot armor, narrative gravity, or automatic success.
+      },
+      {
+        id: "rule-anti-protagonist",
+        name: "Anti-Protagonist Bias",
+        content: `- Anti-Protagonist Bias: The user character is the character the player controls \u2014 nothing more. They don't have plot armor, narrative gravity, or automatic success.
 
 1. AUTOMATIC SUCCESS: Does the user's action succeed without resistance when the character would realistically resist, deflect, or be unimpressed? A character who isn't attracted doesn't become attracted because the user flirted. A character who's busy doesn't drop everything because the user arrived. Replace protagonist-biased reactions with responses consistent with the character's actual personality, attraction level, and context.
 
@@ -1919,11 +1939,11 @@ For all other concerns: note in NOTES only. Do NOT modify the text beyond the th
 4. GRAVITATIONAL PULL: Does the user character dominate scene focus even when they shouldn't? If other characters should be having their own conversations or pursuing their own goals, restore that independence.
 
 FIX: Replace protagonist-biased behavior with what the character's personality and context actually support. If a character wouldn't be impressed, write them unimpressed.`
-        },
-        {
-          id: "rule-nsfw-prose",
-          name: "NSFW Prose Quality",
-          content: `- NSFW Prose Quality: For intimate/sexual scenes only. Scan for NSFW-specific prose failures the general Anti-Slop rule doesn't cover.
+      },
+      {
+        id: "rule-nsfw-prose",
+        name: "NSFW Prose Quality",
+        content: `- NSFW Prose Quality: For intimate/sexual scenes only. Scan for NSFW-specific prose failures the general Anti-Slop rule doesn't cover.
 
 PURPLE NSFW CLICHES \u2014 find and replace:
 - "throbbing member/length/manhood" -> the direct term established earlier, or a character-appropriate alternative
@@ -1951,11 +1971,11 @@ SOUND-EFFECT DIALOGUE:
 "Ahh" / "Mmm" / "Ngh" / "Haa" \u2014 maximum one per response. Replace excess with physical reaction descriptions or fragmented speech.
 
 FIX: Per issue, minimum surgical fix. Replace the phrase, not the paragraph. Maintain the scene's intensity and tone.`
-        },
-        {
-          id: "rule-society",
-          name: "Society Consistency",
-          content: `- Society Consistency: Catches the model injecting modern social sensibilities into settings that don't have them.
+      },
+      {
+        id: "rule-society",
+        name: "Society Consistency",
+        content: `- Society Consistency: Catches the model injecting modern social sensibilities into settings that don't have them.
 
 If a society setting is provided in context (from reasoning), use it as the social framework. Otherwise, infer from the setting's period, cultural markers, and established character dynamics.
 
@@ -1975,11 +1995,11 @@ ANACHRONISTIC PRIORITIES:
 Characters caring about things their culture wouldn't prioritize. Pre-modern characters applying post-Enlightenment ethical frameworks. Fix where priorities don't match the world.
 
 FIX: Adjust dialogue, narration, and character behavior to match the setting's actual social dynamics. For ambiguous cases, note concerns in NOTES.`
-        },
-        {
-          id: "rule-conviction",
-          name: "Conviction Enforcement",
-          content: `- Conviction Enforcement: Catches characters abandoning their positions too easily.
+      },
+      {
+        id: "rule-conviction",
+        name: "Conviction Enforcement",
+        content: `- Conviction Enforcement: Catches characters abandoning their positions too easily.
 
 If a conviction setting is provided in context (from reasoning), use it to calibrate expected stubbornness. Otherwise, infer from the character's described personality and their demonstrated investment in the topic.
 
@@ -1999,11 +2019,11 @@ FLAT OPPOSITION:
 The inverse \u2014 a character opposes the user with no substance. "I disagree" with no reasoning or counter-argument. If opposition lacks substance, add reasoning consistent with the character's personality.
 
 FIX: Restore proportional resistance or add substantive opposition. Characters can be moved \u2014 but the effort required should match their personality and investment.`
-        },
-        {
-          id: "rule-tense",
-          name: "Tense Consistency",
-          content: `- Tense Consistency: Check for tense drift within the response. The response should maintain a consistent tense throughout narration (typically past tense for roleplay).
+      },
+      {
+        id: "rule-tense",
+        name: "Tense Consistency",
+        content: `- Tense Consistency: Check for tense drift within the response. The response should maintain a consistent tense throughout narration (typically past tense for roleplay).
 
 1. NARRATION TENSE: Identify the dominant tense in the first two paragraphs. If the response starts in past tense ("She walked," "He said"), all narration should stay in past tense. If it starts in present ("She walks," "He says"), all narration should stay in present. Flag and fix any paragraph that drifts.
 
@@ -2012,11 +2032,11 @@ FIX: Restore proportional resistance or add substantive opposition. Characters c
 3. EXCEPTION \u2014 Interiority: Internal thoughts may use present tense for immediacy even in past-tense narration (*I can't do this* vs. *She couldn't do this*). This is a stylistic choice \u2014 only flag if the response mixes BOTH styles inconsistently.
 
 FIX: Normalize drifting sentences to the dominant tense. Change the minimum words necessary.`
-        },
-        {
-          id: "rule-spatial",
-          name: "Spatial Coherence",
-          content: `- Spatial Coherence: Check for spatial and physical consistency within the response, using the previous response and last user message as reference.
+      },
+      {
+        id: "rule-spatial",
+        name: "Spatial Coherence",
+        content: `- Spatial Coherence: Check for spatial and physical consistency within the response, using the previous response and last user message as reference.
 
 1. TELEPORTATION: Does a character act on an object or in a location that wasn't established in the scene? If a character grabs a glass, was there a glass? If they cross a room, were they across it? Fix by either establishing the object/position or changing the action.
 
@@ -2027,11 +2047,11 @@ FIX: Normalize drifting sentences to the dominant tense. Change the minimum word
 4. OBJECT PERSISTENCE: Items mentioned early in the response shouldn't vanish. If a character puts something down, it should still be there unless someone moves it.
 
 Only flag clear contradictions. Ambiguity is fine \u2014 the scene may be advancing in ways not fully specified. Fix outright impossibilities.`
-        },
-        {
-          id: "rule-dialogue-tags",
-          name: "Dialogue Tag Economy",
-          content: `- Dialogue Tag Economy: Check dialogue attribution for two opposite failure modes:
+      },
+      {
+        id: "rule-dialogue-tags",
+        name: "Dialogue Tag Economy",
+        content: `- Dialogue Tag Economy: Check dialogue attribution for two opposite failure modes:
 
 1. SAID-BOOKISM EXCESS: Over-reliance on expressive tags \u2014 "growled," "purred," "breathed," "hissed," "intoned," "murmured" \u2014 when the dialogue and context already convey the tone. If the words themselves are angry, the reader doesn't need "he growled." Replace excess bookisms with "said," action tags, or no tag at all when the speaker is clear from context.
 
@@ -2042,106 +2062,102 @@ Only flag clear contradictions. Ambiguity is fine \u2014 the scene may be advanc
 4. ADVERB CRUTCHES: "said softly," "said angrily," "said sadly" \u2014 the adverb doing work the dialogue should do. If the dialogue needs an adverb to convey its tone, the dialogue may need rewriting. Remove the adverb; if the tone is lost, note it in NOTES.
 
 FIX: Vary attribution toward a natural mix: some "said," some action tags, some tagless. Match the scene's pacing \u2014 fast dialogue needs fewer tags, slow dialogue can carry more.`
-        }
-      ],
-      headCollection: [
-        "character-context",
-        "persona-context",
-        "pov-context",
-        "lore-context",
-        "context-block",
-        "rules-header"
-      ],
-      strategy: "pipeline",
-      pipeline: {
-        stages: [
-          {
-            id: "simulacra-prose",
-            name: "Prose & Environment",
-            rows: [
-              {
-                role: "system",
-                promptIds: [
-                  "system-prompt"
-                ]
-              },
-              {
-                role: "user",
-                promptIds: [
-                  "__head__",
-                  "rule-anti-slop",
-                  "rule-repetition-ban",
-                  "rule-env-padding",
-                  "message-to-refine"
-                ]
-              }
-            ]
-          },
-          {
-            id: "simulacra-voice",
-            name: "Voice & Character",
-            rows: [
-              {
-                role: "system",
-                promptIds: [
-                  "system-prompt"
-                ]
-              },
-              {
-                role: "user",
-                promptIds: [
-                  "__head__",
-                  "rule-echo-ban",
-                  "rule-autonomy",
-                  "rule-interiority",
-                  "message-to-refine"
-                ]
-              }
-            ]
-          },
-          {
-            id: "simulacra-structure",
-            name: "Structure & Fairness",
-            rows: [
-              {
-                role: "system",
-                promptIds: [
-                  "system-prompt"
-                ]
-              },
-              {
-                role: "user",
-                promptIds: [
-                  "__head__",
-                  "rule-ending",
-                  "rule-anti-protagonist",
-                  "rule-pov",
-                  "message-to-refine"
-                ]
-              }
-            ]
-          }
-        ]
       }
-    }
-  };
-});
-
-// built-in-presets/output/redraft-parallel-3.0.0.hone-preset.json
-var redraft_parallel_3_0_0_hone_preset_default;
-var init_redraft_parallel_3_0_0_hone_preset = __esm(() => {
-  redraft_parallel_3_0_0_hone_preset_default = {
-    formatVersion: 1,
-    exportedAt: "2026-04-12T08:30:00.000Z",
-    preset: {
-      id: "redraft-parallel-3.0.0",
-      name: "ReDraft Parallel 3.0.0",
-      shieldLiteralBlocks: true,
-      prompts: [
+    ],
+    headCollection: [
+      "character-context",
+      "persona-context",
+      "pov-context",
+      "lore-context",
+      "context-block",
+      "rules-header"
+    ],
+    strategy: "pipeline",
+    pipeline: {
+      stages: [
         {
-          id: "system-prompt",
-          name: "System Prompt",
-          content: `You are a roleplay prose editor. You refine AI-generated roleplay messages by applying specific rules while preserving the author's creative intent.
+          id: "simulacra-prose",
+          name: "Prose & Environment",
+          rows: [
+            {
+              role: "system",
+              promptIds: [
+                "system-prompt"
+              ]
+            },
+            {
+              role: "user",
+              promptIds: [
+                "__head__",
+                "rule-anti-slop",
+                "rule-repetition-ban",
+                "rule-env-padding",
+                "message-to-refine"
+              ]
+            }
+          ]
+        },
+        {
+          id: "simulacra-voice",
+          name: "Voice & Character",
+          rows: [
+            {
+              role: "system",
+              promptIds: [
+                "system-prompt"
+              ]
+            },
+            {
+              role: "user",
+              promptIds: [
+                "__head__",
+                "rule-echo-ban",
+                "rule-autonomy",
+                "rule-interiority",
+                "message-to-refine"
+              ]
+            }
+          ]
+        },
+        {
+          id: "simulacra-structure",
+          name: "Structure & Fairness",
+          rows: [
+            {
+              role: "system",
+              promptIds: [
+                "system-prompt"
+              ]
+            },
+            {
+              role: "user",
+              promptIds: [
+                "__head__",
+                "rule-ending",
+                "rule-anti-protagonist",
+                "rule-pov",
+                "message-to-refine"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+};
+// built-in-presets/output/redraft-parallel-3.0.0.hone-preset.json
+var redraft_parallel_3_0_0_hone_preset_default = {
+  formatVersion: 1,
+  exportedAt: "2026-04-12T08:30:00.000Z",
+  preset: {
+    id: "redraft-parallel-3.0.0",
+    name: "ReDraft Parallel 3.0.0",
+    shieldLiteralBlocks: true,
+    prompts: [
+      {
+        id: "system-prompt",
+        name: "System Prompt",
+        content: `You are a roleplay prose editor. You refine AI-generated roleplay messages by applying specific rules while preserving the author's creative intent.
 
 Core principles:
 - Be heavy handed, continuously look for small opportunities to change things. Change many things.
@@ -2178,11 +2194,11 @@ Example:
 Do NOT output any analysis, reasoning, or commentary outside the tags. Only output the two tagged blocks.
 
 You will be given the original message, a set of refinement rules to apply, and optionally context about the characters and recent conversation. Apply the rules faithfully.`
-        },
-        {
-          id: "aggregator-system",
-          name: "Aggregator System Prompt",
-          content: `You are a refinement aggregator. You have received multiple independently-refined versions of the same roleplay message, each produced by a different agent applying a different subset of rules.
+      },
+      {
+        id: "aggregator-system",
+        name: "Aggregator System Prompt",
+        content: `You are a refinement aggregator. You have received multiple independently-refined versions of the same roleplay message, each produced by a different agent applying a different subset of rules.
 
 Your job is to merge all improvements into a single final version that incorporates every valid change from every agent while maintaining coherence.
 
@@ -2213,11 +2229,11 @@ After merging, scan the result against the complete rule set below. If a merged 
 - Fix formatting: Fix orphaned marks, inconsistent styles, dialogue punctuation.
 - Fix crafted endings: Remove dismount patterns \u2014 poetic final lines, fragment clusters for weight, summary narration after the last dialogue/action.
 - Maintain lore consistency: Flag glaring contradictions with established character/world information.`
-        },
-        {
-          id: "aggregator-user",
-          name: "Aggregator Input",
-          content: `[ORIGINAL MESSAGE]
+      },
+      {
+        id: "aggregator-user",
+        name: "Aggregator Input",
+        content: `[ORIGINAL MESSAGE]
 {{original}}
 
 {{proposals}}
@@ -2230,57 +2246,57 @@ Merge all agent improvements into a single refined message. Output format:
 <HONE-OUTPUT>
 <merged refined message>
 </HONE-OUTPUT>`
-        },
-        {
-          id: "character-context",
-          name: "Character Description",
-          content: `[CHARACTER: {{char}}]
+      },
+      {
+        id: "character-context",
+        name: "Character Description",
+        content: `[CHARACTER: {{char}}]
 {{description}}`
-        },
-        {
-          id: "persona-context",
-          name: "User Persona",
-          content: `[USER PERSONA]
+      },
+      {
+        id: "persona-context",
+        name: "User Persona",
+        content: `[USER PERSONA]
 {{persona}}`
-        },
-        {
-          id: "pov-context",
-          name: "POV Instruction",
-          content: `[POV]
+      },
+      {
+        id: "pov-context",
+        name: "POV Instruction",
+        content: `[POV]
 {{pov}}`
-        },
-        {
-          id: "context-block",
-          name: "Chat History",
-          content: `[CHAT HISTORY]
+      },
+      {
+        id: "context-block",
+        name: "Chat History",
+        content: `[CHAT HISTORY]
 {{context}}`
-        },
-        {
-          id: "lore-context",
-          name: "Lore Context",
-          content: `[WORLD INFO]
+      },
+      {
+        id: "lore-context",
+        name: "Lore Context",
+        content: `[WORLD INFO]
 {{lore}}`
-        },
-        {
-          id: "rules-header",
-          name: "Rules Header",
-          content: "[RULES]"
-        },
-        {
-          id: "message-to-refine",
-          name: "Message to Refine",
-          content: `[MESSAGE TO REFINE]
+      },
+      {
+        id: "rules-header",
+        name: "Rules Header",
+        content: "[RULES]"
+      },
+      {
+        id: "message-to-refine",
+        name: "Message to Refine",
+        content: `[MESSAGE TO REFINE]
 {{latest}}`
-        },
-        {
-          id: "rule-grammar",
-          name: "Grammar & Spelling",
-          content: "- Fix grammar & spelling: Fix grammatical errors, spelling mistakes, and awkward phrasing. Do not alter intentional dialect, slang, verbal tics, or character-specific speech patterns \u2014 only correct genuine errors. Preserve intentional sentence fragments used for rhythm or voice."
-        },
-        {
-          id: "rule-echo",
-          name: "Echo Removal",
-          content: `- Remove echo & restatement: Using the "Last user message" from context above, scan for sentences where the character restates, paraphrases, or references the user's previous message instead of advancing the scene.
+      },
+      {
+        id: "rule-grammar",
+        name: "Grammar & Spelling",
+        content: "- Fix grammar & spelling: Fix grammatical errors, spelling mistakes, and awkward phrasing. Do not alter intentional dialect, slang, verbal tics, or character-specific speech patterns \u2014 only correct genuine errors. Preserve intentional sentence fragments used for rhythm or voice."
+      },
+      {
+        id: "rule-echo",
+        name: "Echo Removal",
+        content: `- Remove echo & restatement: Using the "Last user message" from context above, scan for sentences where the character restates, paraphrases, or references the user's previous message instead of advancing the scene.
 
 BANNED patterns \u2014 if the sentence matches, cut and replace with forward motion:
 1. Character speaks ABOUT what user said/did (any tense): "You're asking me to..." / "You said..." / "You want me to..."
@@ -2289,52 +2305,52 @@ BANNED patterns \u2014 if the sentence matches, cut and replace with forward mot
 4. Processing narration: "Your words [verb]..." (hung, landed, settled) / Character processing what user said / Italicized replays of user's dialogue as character thought.
 
 Check the WHOLE response, not just the opening. Replace cut content with character action \u2014 what they do next, not what they think about what was said. One-word acknowledgment permitted ("Yeah." / nod), then forward.`
-        },
-        {
-          id: "rule-repetition",
-          name: "Repetition",
-          content: `- Reduce repetition: Using the "Previous response ending" from context above, scan for repetitive elements within this response AND compared to the previous response:
+      },
+      {
+        id: "rule-repetition",
+        name: "Repetition",
+        content: `- Reduce repetition: Using the "Previous response ending" from context above, scan for repetitive elements within this response AND compared to the previous response:
 1. Repeated physical actions: Same gesture appearing twice+ (crossing arms, sighing, looking away). Replace the second instance with a different physical expression.
 2. Repeated sentence structures: Same openings, same punctuation patterns, same metaphor family used twice+.
 3. Repeated emotional beats: Character hitting the same note twice without progression. If angry twice, the second should be a different texture.
 
 Do NOT remove intentional repetition for rhetorical effect (anaphora, callbacks, echoed dialogue). Only flag mechanical/unconscious repetition.`
-        },
-        {
-          id: "rule-voice",
-          name: "Character Voice",
-          content: `- Maintain character voice: Using the "Character" context provided above, verify each character's dialogue is distinct and consistent:
+      },
+      {
+        id: "rule-voice",
+        name: "Character Voice",
+        content: `- Maintain character voice: Using the "Character" context provided above, verify each character's dialogue is distinct and consistent:
 1. Speech patterns: If a character uses contractions, slang, verbal tics, or specific vocabulary \u2014 preserve them. Do not polish rough speech into grammatically correct prose.
 2. Voice flattening: If multiple characters speak, their dialogue should sound different. Flag if all characters use the same register or vocabulary level.
 3. Register consistency: A casual character shouldn't suddenly become eloquent mid-scene (unless that shift IS the point).
 
 Do not homogenize dialogue. A character's voice is more important than technically "correct" writing.`
-        },
-        {
-          id: "rule-prose",
-          name: "Prose Quality",
-          content: `- Clean up prose: Scan for common AI prose weaknesses. Per issue found, make the minimum surgical fix:
+      },
+      {
+        id: "rule-prose",
+        name: "Prose Quality",
+        content: `- Clean up prose: Scan for common AI prose weaknesses. Per issue found, make the minimum surgical fix:
 1. Somatic clich\xE9s: "breath hitched/caught," "heart skipped/clenched," "stomach dropped/tightened," "shiver down spine." Replace with plain statement or specific physical detail.
 2. Purple prose: "Velvety voice," "liquid tone," "fluid grace," "pregnant pause," cosmic melodrama. Replace with concrete, grounded language.
 3. Filter words: "She noticed," "he felt," "she realized." Cut the filter \u2014 go direct.
 4. Telling over showing: "She felt sad" / "He was angry." Replace with embodied reactions ONLY if the telling is genuinely weaker.
 
 Do NOT over-edit. If prose is functional and voice-consistent, leave it alone. This rule targets clear weaknesses, not style preferences.`
-        },
-        {
-          id: "rule-formatting",
-          name: "Formatting",
-          content: `- Fix formatting: Ensure consistent formatting within the response's existing convention:
+      },
+      {
+        id: "rule-formatting",
+        name: "Formatting",
+        content: `- Fix formatting: Ensure consistent formatting within the response's existing convention:
 1. Fix orphaned formatting marks (unclosed asterisks, mismatched quotes, broken tags)
 2. Fix inconsistent style (mixing *asterisks* and _underscores_ for the same purpose)
 3. Ensure dialogue punctuation is consistent with the established convention
 
 Do not change the author's chosen formatting convention \u2014 only correct errors within it.`
-        },
-        {
-          id: "rule-ending",
-          name: "Ending (Opinionated)",
-          content: `- Fix crafted endings: Check if the response ends with a "dismount" \u2014 a crafted landing designed to feel like an ending rather than a mid-scene pause.
+      },
+      {
+        id: "rule-ending",
+        name: "Ending (Opinionated)",
+        content: `- Fix crafted endings: Check if the response ends with a "dismount" \u2014 a crafted landing designed to feel like an ending rather than a mid-scene pause.
 
 DISMOUNT patterns to fix:
 1. Dialogue payload followed by physical stillness: "Her thumb rested on his pulse." \u2014 body part + state verb + location as final beat.
@@ -2346,146 +2362,142 @@ DISMOUNT patterns to fix:
 FIX: Find the last line of dialogue or action with unresolved consequences. Cut everything after it. If the response has no dialogue (pure narration/action), find the last action with unresolved consequences and cut any stillness or summary after it. The response should end mid-scene.
 
 EXCEPTION: If the scene is genuinely concluding (location change, time skip, departure), one clean landing beat is permitted.`
-        },
-        {
-          id: "rule-lore",
-          name: "Lore Consistency",
-          content: `- Maintain lore consistency: Using the "Character" context provided above, flag only glaring contradictions with established character/world information. Examples: wrong eye color, wrong relationship status, referencing events that didn't happen, contradicting established abilities.
+      },
+      {
+        id: "rule-lore",
+        name: "Lore Consistency",
+        content: `- Maintain lore consistency: Using the "Character" context provided above, flag only glaring contradictions with established character/world information. Examples: wrong eye color, wrong relationship status, referencing events that didn't happen, contradicting established abilities.
 
 Do not invent new lore. When uncertain, preserve the original phrasing rather than "correcting" it. Minor ambiguities are not errors.`
-        }
-      ],
-      headCollection: [
-        "character-context",
-        "persona-context",
-        "pov-context",
-        "lore-context",
-        "context-block",
-        "rules-header"
-      ],
-      strategy: "parallel",
-      parallel: {
-        proposals: [
-          {
-            stages: [
-              {
-                id: "agent-grammar",
-                name: "Grammar & Formatting",
-                rows: [
-                  {
-                    role: "system",
-                    promptIds: [
-                      "system-prompt"
-                    ]
-                  },
-                  {
-                    role: "user",
-                    promptIds: [
-                      "__head__",
-                      "rule-grammar",
-                      "rule-formatting",
-                      "message-to-refine"
-                    ]
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            stages: [
-              {
-                id: "agent-prose",
-                name: "Prose & Voice",
-                rows: [
-                  {
-                    role: "system",
-                    promptIds: [
-                      "system-prompt"
-                    ]
-                  },
-                  {
-                    role: "user",
-                    promptIds: [
-                      "__head__",
-                      "rule-prose",
-                      "rule-voice",
-                      "rule-echo",
-                      "message-to-refine"
-                    ]
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            stages: [
-              {
-                id: "agent-continuity",
-                name: "Continuity & Flow",
-                rows: [
-                  {
-                    role: "system",
-                    promptIds: [
-                      "system-prompt"
-                    ]
-                  },
-                  {
-                    role: "user",
-                    promptIds: [
-                      "__head__",
-                      "rule-repetition",
-                      "rule-ending",
-                      "rule-lore",
-                      "message-to-refine"
-                    ]
-                  }
-                ]
-              }
-            ]
-          }
-        ],
-        aggregator: {
+      }
+    ],
+    headCollection: [
+      "character-context",
+      "persona-context",
+      "pov-context",
+      "lore-context",
+      "context-block",
+      "rules-header"
+    ],
+    strategy: "parallel",
+    parallel: {
+      proposals: [
+        {
           stages: [
             {
-              id: "aggregator",
-              name: "Aggregator",
+              id: "agent-grammar",
+              name: "Grammar & Formatting",
               rows: [
                 {
                   role: "system",
                   promptIds: [
-                    "aggregator-system"
+                    "system-prompt"
                   ]
                 },
                 {
                   role: "user",
                   promptIds: [
-                    "aggregator-user"
+                    "__head__",
+                    "rule-grammar",
+                    "rule-formatting",
+                    "message-to-refine"
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          stages: [
+            {
+              id: "agent-prose",
+              name: "Prose & Voice",
+              rows: [
+                {
+                  role: "system",
+                  promptIds: [
+                    "system-prompt"
+                  ]
+                },
+                {
+                  role: "user",
+                  promptIds: [
+                    "__head__",
+                    "rule-prose",
+                    "rule-voice",
+                    "rule-echo",
+                    "message-to-refine"
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          stages: [
+            {
+              id: "agent-continuity",
+              name: "Continuity & Flow",
+              rows: [
+                {
+                  role: "system",
+                  promptIds: [
+                    "system-prompt"
+                  ]
+                },
+                {
+                  role: "user",
+                  promptIds: [
+                    "__head__",
+                    "rule-repetition",
+                    "rule-ending",
+                    "rule-lore",
+                    "message-to-refine"
                   ]
                 }
               ]
             }
           ]
         }
+      ],
+      aggregator: {
+        stages: [
+          {
+            id: "aggregator",
+            name: "Aggregator",
+            rows: [
+              {
+                role: "system",
+                promptIds: [
+                  "aggregator-system"
+                ]
+              },
+              {
+                role: "user",
+                promptIds: [
+                  "aggregator-user"
+                ]
+              }
+            ]
+          }
+        ]
       }
     }
-  };
-});
-
+  }
+};
 // built-in-presets/output/simulacra-v4-parallel-1.0.hone-preset.json
-var simulacra_v4_parallel_1_0_hone_preset_default;
-var init_simulacra_v4_parallel_1_0_hone_preset = __esm(() => {
-  simulacra_v4_parallel_1_0_hone_preset_default = {
-    formatVersion: 1,
-    exportedAt: "2026-04-12T08:30:00.000Z",
-    preset: {
-      id: "simulacra-v4-parallel-1.0",
-      name: "Simulacra Rules V4 Parallel",
-      shieldLiteralBlocks: true,
-      prompts: [
-        {
-          id: "system-prompt",
-          name: "System Prompt",
-          content: `You are a roleplay prose editor. You refine AI-generated roleplay messages by applying specific rules while preserving the author's creative intent.
+var simulacra_v4_parallel_1_0_hone_preset_default = {
+  formatVersion: 1,
+  exportedAt: "2026-04-12T08:30:00.000Z",
+  preset: {
+    id: "simulacra-v4-parallel-1.0",
+    name: "Simulacra Rules V4 Parallel",
+    shieldLiteralBlocks: true,
+    prompts: [
+      {
+        id: "system-prompt",
+        name: "System Prompt",
+        content: `You are a roleplay prose editor. You refine AI-generated roleplay messages by applying specific rules while preserving the author's creative intent.
 
 Core principles:
 - Be heavy handed, continuously look for small opportunities to change things. Change many things.
@@ -2522,11 +2534,11 @@ Example:
 Do NOT output any analysis, reasoning, or commentary outside the tags. Only output the two tagged blocks.
 
 You will be given the original message, a set of refinement rules to apply, and optionally context about the characters and recent conversation. Apply the rules faithfully.`
-        },
-        {
-          id: "aggregator-system",
-          name: "Aggregator System Prompt",
-          content: `You are a refinement aggregator. You have received multiple independently-refined versions of the same roleplay message, each produced by a different agent applying a different subset of the Simulacra V4 rules.
+      },
+      {
+        id: "aggregator-system",
+        name: "Aggregator System Prompt",
+        content: `You are a refinement aggregator. You have received multiple independently-refined versions of the same roleplay message, each produced by a different agent applying a different subset of the Simulacra V4 rules.
 
 Your job is to merge all improvements into a single final version that incorporates every valid change from every agent while maintaining coherence.
 
@@ -2558,11 +2570,11 @@ After merging, scan the result against the core rules below. If a merged change 
 - Anti-Protagonist Bias: No automatic success, universal submission, magic touch, or gravitational pull for the user character.
 - Response Ending: Cut dismount patterns after the last dialogue/action with unresolved consequences.
 - POV Pronoun Enforcement: Fix 1.5th-person trap, knowledge boundaries, mid-response POV drift.`
-        },
-        {
-          id: "aggregator-user",
-          name: "Aggregator Input",
-          content: `[ORIGINAL MESSAGE]
+      },
+      {
+        id: "aggregator-user",
+        name: "Aggregator Input",
+        content: `[ORIGINAL MESSAGE]
 {{original}}
 
 {{proposals}}
@@ -2575,52 +2587,52 @@ Merge all agent improvements into a single refined message. Output format:
 <HONE-OUTPUT>
 <merged refined message>
 </HONE-OUTPUT>`
-        },
-        {
-          id: "character-context",
-          name: "Character Description",
-          content: `[CHARACTER: {{char}}]
+      },
+      {
+        id: "character-context",
+        name: "Character Description",
+        content: `[CHARACTER: {{char}}]
 {{description}}`
-        },
-        {
-          id: "persona-context",
-          name: "User Persona",
-          content: `[USER PERSONA]
+      },
+      {
+        id: "persona-context",
+        name: "User Persona",
+        content: `[USER PERSONA]
 {{persona}}`
-        },
-        {
-          id: "pov-context",
-          name: "POV Instruction",
-          content: `[POV]
+      },
+      {
+        id: "pov-context",
+        name: "POV Instruction",
+        content: `[POV]
 {{pov}}`
-        },
-        {
-          id: "context-block",
-          name: "Chat History",
-          content: `[CHAT HISTORY]
+      },
+      {
+        id: "context-block",
+        name: "Chat History",
+        content: `[CHAT HISTORY]
 {{context}}`
-        },
-        {
-          id: "lore-context",
-          name: "Lore Context",
-          content: `[WORLD INFO]
+      },
+      {
+        id: "lore-context",
+        name: "Lore Context",
+        content: `[WORLD INFO]
 {{lore}}`
-        },
-        {
-          id: "rules-header",
-          name: "Rules Header",
-          content: "[RULES]"
-        },
-        {
-          id: "message-to-refine",
-          name: "Message to Refine",
-          content: `[MESSAGE TO REFINE]
+      },
+      {
+        id: "rules-header",
+        name: "Rules Header",
+        content: "[RULES]"
+      },
+      {
+        id: "message-to-refine",
+        name: "Message to Refine",
+        content: `[MESSAGE TO REFINE]
 {{latest}}`
-        },
-        {
-          id: "rule-echo-ban",
-          name: "Echo Ban",
-          content: `- Echo Ban: Known LLM failure mode: restating the user's previous message instead of advancing the scene. The generating model perceives this as authentic voice and will pass its own self-check. You are the independent checker.
+      },
+      {
+        id: "rule-echo-ban",
+        name: "Echo Ban",
+        content: `- Echo Ban: Known LLM failure mode: restating the user's previous message instead of advancing the scene. The generating model perceives this as authentic voice and will pass its own self-check. You are the independent checker.
 
 Using the "Last user message" from context above:
 
@@ -2641,11 +2653,11 @@ E2. Semantic transformation: The character attributes meaning the user didn't li
 E3. Deal confirmation: Restating mutual terms to establish a binding commitment ("You said a week. I said a week.") creates a new narrative fact. Test: does the restatement produce a commitment, or just show the character heard? Commitment = permitted.
 
 FIX: Cut the violating sentence. Replace with the character's NEXT ACTION \u2014 what they do, say about a new subject, or decide. One-word acknowledgment permitted ("Yeah." / nod), then forward. Do not rephrase the echo \u2014 delete it and bridge the gap.`
-        },
-        {
-          id: "rule-interiority",
-          name: "Interiority Constraints",
-          content: `- Interiority Constraints: Enforce hard limits on internal monologue density. A "thought block" = consecutive italicized sentences representing internal monologue (not individual italicized words used for emphasis or action formatting like *she grabbed the door*).
+      },
+      {
+        id: "rule-interiority",
+        name: "Interiority Constraints",
+        content: `- Interiority Constraints: Enforce hard limits on internal monologue density. A "thought block" = consecutive italicized sentences representing internal monologue (not individual italicized words used for emphasis or action formatting like *she grabbed the door*).
 
 1. BLOCK LIMIT: Maximum 3 thought blocks per response. If more exist, cut the weakest \u2014 the ones that tell the reader something already conveyed by dialogue or action.
 
@@ -2654,22 +2666,22 @@ FIX: Cut the violating sentence. Replace with the character's NEXT ACTION \u2014
 3. SPIRAL LIMIT: No single thought block exceeds 4 sentences. If longer, break it with action, dialogue, or sensory grounding.
 
 4. ANNOUNCEMENT BAN: Cut sentences where a character narrates their own narrative function: "I was deflecting." / "She realized she was stalling." / "He knew he was avoiding the question." Replace with the actual interior experience \u2014 the emotion underneath, not the character's meta-awareness of their own behavior.`
-        },
-        {
-          id: "rule-env-padding",
-          name: "Environmental Padding Ban",
-          content: `- Environmental Padding Ban: Mid-scene environmental detail (passing carts, ambient workers, weather shifts, background sounds, atmospheric description) must pass this test:
+      },
+      {
+        id: "rule-env-padding",
+        name: "Environmental Padding Ban",
+        content: `- Environmental Padding Ban: Mid-scene environmental detail (passing carts, ambient workers, weather shifts, background sounds, atmospheric description) must pass this test:
 
 Does a character interact with it, react to it, learn from it, or have their action blocked or enabled by it?
 
 If NO to all four: the detail is padding. Cut it. The response doesn't need another cart, another breeze, or another lighting description unless a character engages with it.
 
 EXCEPTION: Scene transitions or new location arrivals are exempt \u2014 establishing a new environment IS the narrative function.`
-        },
-        {
-          id: "rule-anti-slop",
-          name: "Anti-Slop (Prose Pattern Ban)",
-          content: `- Anti-Slop (Prose Pattern Ban): Scan for and fix these AI prose patterns in NARRATION. Per issue, make the minimum surgical fix \u2014 change the sentence, not the paragraph. Do not evaluate whether a matching pattern is 'functional' or 'justified.' If the pattern matches, fix it. A good replacement serves the same narrative function without the cliche. Characters may use any of these patterns in dialogue \u2014 cliched speech is a voice choice, not a prose failure.
+      },
+      {
+        id: "rule-anti-slop",
+        name: "Anti-Slop (Prose Pattern Ban)",
+        content: `- Anti-Slop (Prose Pattern Ban): Scan for and fix these AI prose patterns in NARRATION. Per issue, make the minimum surgical fix \u2014 change the sentence, not the paragraph. Do not evaluate whether a matching pattern is 'functional' or 'justified.' If the pattern matches, fix it. A good replacement serves the same narrative function without the cliche. Characters may use any of these patterns in dialogue \u2014 cliched speech is a voice choice, not a prose failure.
 
 1. SOMATIC CLICHES: breath hitching/catching, heart skipping/clenching, stomach dropping/tightening, shivers down spines, going still, sharp inhales, blood running cold/hot. Replace with plain statement or character-specific physical detail.
 
@@ -2682,11 +2694,11 @@ EXCEPTION: Scene transitions or new location arrivals are exempt \u2014 establis
 5. INFLATION: Cosmic melodrama (world shattering, time stopping), unearned intensifiers. Replace with smaller, specific details \u2014 the domestic carries the cosmic.
 
 6. AI FINGERPRINTS: "Something shifted," "the air between them changed," "a beat of silence," "the weight of [abstract noun]." These are filler. Cut or replace with specific, concrete detail.`
-        },
-        {
-          id: "rule-repetition-ban",
-          name: "Repetition Ban",
-          content: `- Repetition Ban: Scan the full response for repeated distinctive words, body parts, images, or sensory details.
+      },
+      {
+        id: "rule-repetition-ban",
+        name: "Repetition Ban",
+        content: `- Repetition Ban: Scan the full response for repeated distinctive words, body parts, images, or sensory details.
 
 THRESHOLD: Same distinctive word, body part, or image appearing 3+ times in one response \u2014 fix from the 2nd occurrence onward. Replace each repeat with a specific alternative that serves the same narrative function, or restructure the sentence to avoid the term.
 
@@ -2695,22 +2707,22 @@ What counts as 'distinctive': nouns for specific body parts (toes, throat, wrist
 Do not evaluate whether each instance serves a 'distinct emotional beat' or 'rhetorical purpose.' The reader doesn't audit justifications \u2014 they notice repetition. If the same distinctive word appears 3+ times, the 2nd and subsequent uses need alternatives regardless of narrative intent.
 
 EXCEPTION: Exact-word repetition within a single sentence or clause for deliberate rhythmic/anaphoric effect ("Step by step by step."). Cross-paragraph repetition of the same word is not anaphora \u2014 fix it.`
-        },
-        {
-          id: "rule-pov",
-          name: "POV Pronoun Enforcement",
-          content: `- POV Pronoun Enforcement: The POV instruction provided above establishes the pronoun conventions for this session. This rule enforces that instruction and covers drift it doesn't already catch.
+      },
+      {
+        id: "rule-pov",
+        name: "POV Pronoun Enforcement",
+        content: `- POV Pronoun Enforcement: The POV instruction provided above establishes the pronoun conventions for this session. This rule enforces that instruction and covers drift it doesn't already catch.
 
 1. PRONOUN MAPPING VIOLATIONS: Re-read the POV instruction above. Every sentence in narration or description (outside of another character's dialogue) that uses a pronoun pattern inconsistent with that instruction is a violation. Fix every instance. Common failure: the model falls back to its own defaults \u2014 first-person "I/me" narration, or second-person "you/your" for the user character \u2014 when the configured POV specifies something else. Match the configured POV exactly, even when the original draft drifts.
 
 2. KNOWLEDGE BOUNDARIES: Does the POV character reference events they couldn't have witnessed, or know another character's private thoughts without being told? Impossible knowledge is a POV violation \u2014 remove or reframe as inference/speculation.
 
 3. MID-RESPONSE POV DRIFT: Does the narrative perspective shift from one character's interiority to another's without a scene break? One character's internal thoughts should not appear in the same continuous passage as another's. Fix by removing the intruding perspective or adding a clear break.`
-        },
-        {
-          id: "rule-ending",
-          name: "Response Ending Enforcement",
-          content: `- Response Ending Enforcement: Known LLM failure mode: writing a natural mid-scene pause, then adding 1-3 sentences of "dismount" that craft an ending.
+      },
+      {
+        id: "rule-ending",
+        name: "Response Ending Enforcement",
+        content: `- Response Ending Enforcement: Known LLM failure mode: writing a natural mid-scene pause, then adding 1-3 sentences of "dismount" that craft an ending.
 
 MECHANICAL CHECK:
 
@@ -2727,11 +2739,11 @@ Step 3 (no pattern match): Check final 2-3 sentences for deceleration \u2014 mot
 EXCEPTION 1: Genuine scene conclusion (location change, time skip, departure) \u2014 one clean beat permitted. Not a multi-sentence poetic dismount.
 
 EXCEPTION 2 \u2014 Action-intention fragments: Fragment clusters that SPECIFY THE INTENTION of a preceding physical action are functional, not dismounts. Test: remove the fragments. Does the action lose its narrative point? If the gesture becomes ambiguous without them, they're functional \u2014 KEEP. If the gesture is already clear and the fragments add poetic weight \u2014 CUT.`
-        },
-        {
-          id: "rule-autonomy",
-          name: "Character Autonomy Check",
-          content: `- Character Autonomy Check: Verify that non-user characters behave as independent agents, not as supporting cast oriented around the user:
+      },
+      {
+        id: "rule-autonomy",
+        name: "Character Autonomy Check",
+        content: `- Character Autonomy Check: Verify that non-user characters behave as independent agents, not as supporting cast oriented around the user:
 
 1. INDEPENDENT ACTION: At least one character should do something NOT directly prompted by the user's last message. If every character action is a direct response to the user \u2014 flag it.
 
@@ -2742,11 +2754,11 @@ EXCEPTION 2 \u2014 Action-intention fragments: Fragment clusters that SPECIFY TH
 4. ORBIT CHECK (multi-character scenes): Is everyone oriented toward the user? Characters should talk to each other, have side reactions, pursue their own threads.
 
 5. BLANK SLATE ARRIVAL: Does a character enter with no momentum? They should arrive mid-something \u2014 from somewhere, carrying context, not as a blank slate waiting for the user to activate them.`
-        },
-        {
-          id: "rule-anti-protagonist",
-          name: "Anti-Protagonist Bias",
-          content: `- Anti-Protagonist Bias: The user character is the character the player controls \u2014 nothing more. They don't have plot armor, narrative gravity, or automatic success.
+      },
+      {
+        id: "rule-anti-protagonist",
+        name: "Anti-Protagonist Bias",
+        content: `- Anti-Protagonist Bias: The user character is the character the player controls \u2014 nothing more. They don't have plot armor, narrative gravity, or automatic success.
 
 1. AUTOMATIC SUCCESS: Does the user's action succeed without resistance when the character would realistically resist, deflect, or be unimpressed? A character who isn't attracted doesn't become attracted because the user flirted. A character who's busy doesn't drop everything because the user arrived. Replace protagonist-biased reactions with responses consistent with the character's actual personality, attraction level, and context.
 
@@ -2757,142 +2769,138 @@ EXCEPTION 2 \u2014 Action-intention fragments: Fragment clusters that SPECIFY TH
 4. GRAVITATIONAL PULL: Does the user character dominate scene focus even when they shouldn't? If other characters should be having their own conversations or pursuing their own goals, restore that independence.
 
 FIX: Replace protagonist-biased behavior with what the character's personality and context actually support. If a character wouldn't be impressed, write them unimpressed.`
-        }
-      ],
-      headCollection: [
-        "character-context",
-        "persona-context",
-        "pov-context",
-        "lore-context",
-        "context-block",
-        "rules-header"
-      ],
-      strategy: "parallel",
-      parallel: {
-        proposals: [
-          {
-            stages: [
-              {
-                id: "agent-prose",
-                name: "Prose & Environment",
-                rows: [
-                  {
-                    role: "system",
-                    promptIds: [
-                      "system-prompt"
-                    ]
-                  },
-                  {
-                    role: "user",
-                    promptIds: [
-                      "__head__",
-                      "rule-anti-slop",
-                      "rule-repetition-ban",
-                      "rule-env-padding",
-                      "message-to-refine"
-                    ]
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            stages: [
-              {
-                id: "agent-voice",
-                name: "Voice & Character",
-                rows: [
-                  {
-                    role: "system",
-                    promptIds: [
-                      "system-prompt"
-                    ]
-                  },
-                  {
-                    role: "user",
-                    promptIds: [
-                      "__head__",
-                      "rule-echo-ban",
-                      "rule-autonomy",
-                      "rule-interiority",
-                      "message-to-refine"
-                    ]
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            stages: [
-              {
-                id: "agent-structure",
-                name: "Structure & Fairness",
-                rows: [
-                  {
-                    role: "system",
-                    promptIds: [
-                      "system-prompt"
-                    ]
-                  },
-                  {
-                    role: "user",
-                    promptIds: [
-                      "__head__",
-                      "rule-ending",
-                      "rule-anti-protagonist",
-                      "rule-pov",
-                      "message-to-refine"
-                    ]
-                  }
-                ]
-              }
-            ]
-          }
-        ],
-        aggregator: {
+      }
+    ],
+    headCollection: [
+      "character-context",
+      "persona-context",
+      "pov-context",
+      "lore-context",
+      "context-block",
+      "rules-header"
+    ],
+    strategy: "parallel",
+    parallel: {
+      proposals: [
+        {
           stages: [
             {
-              id: "aggregator",
-              name: "Aggregator",
+              id: "agent-prose",
+              name: "Prose & Environment",
               rows: [
                 {
                   role: "system",
                   promptIds: [
-                    "aggregator-system"
+                    "system-prompt"
                   ]
                 },
                 {
                   role: "user",
                   promptIds: [
-                    "aggregator-user"
+                    "__head__",
+                    "rule-anti-slop",
+                    "rule-repetition-ban",
+                    "rule-env-padding",
+                    "message-to-refine"
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          stages: [
+            {
+              id: "agent-voice",
+              name: "Voice & Character",
+              rows: [
+                {
+                  role: "system",
+                  promptIds: [
+                    "system-prompt"
+                  ]
+                },
+                {
+                  role: "user",
+                  promptIds: [
+                    "__head__",
+                    "rule-echo-ban",
+                    "rule-autonomy",
+                    "rule-interiority",
+                    "message-to-refine"
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          stages: [
+            {
+              id: "agent-structure",
+              name: "Structure & Fairness",
+              rows: [
+                {
+                  role: "system",
+                  promptIds: [
+                    "system-prompt"
+                  ]
+                },
+                {
+                  role: "user",
+                  promptIds: [
+                    "__head__",
+                    "rule-ending",
+                    "rule-anti-protagonist",
+                    "rule-pov",
+                    "message-to-refine"
                   ]
                 }
               ]
             }
           ]
         }
+      ],
+      aggregator: {
+        stages: [
+          {
+            id: "aggregator",
+            name: "Aggregator",
+            rows: [
+              {
+                role: "system",
+                promptIds: [
+                  "aggregator-system"
+                ]
+              },
+              {
+                role: "user",
+                promptIds: [
+                  "aggregator-user"
+                ]
+              }
+            ]
+          }
+        ]
       }
     }
-  };
-});
-
+  }
+};
 // built-in-presets/output/extreme-example.hone-preset.json
-var extreme_example_hone_preset_default;
-var init_extreme_example_hone_preset = __esm(() => {
-  extreme_example_hone_preset_default = {
-    formatVersion: 1,
-    exportedAt: "2026-04-14T02:27:38.687Z",
-    preset: {
-      id: "extreme-example-pipeline",
-      name: "Extreme Example Pipeline",
-      builtIn: false,
-      slot: "output",
-      shieldLiteralBlocks: true,
-      prompts: [
-        {
-          id: "system-prompt",
-          name: "System Prompt",
-          content: `You are a roleplay prose editor. You refine AI-generated roleplay messages by applying specific rules while preserving the author's creative intent.
+var extreme_example_hone_preset_default = {
+  formatVersion: 1,
+  exportedAt: "2026-04-14T02:27:38.687Z",
+  preset: {
+    id: "extreme-example-pipeline",
+    name: "Extreme Example Pipeline",
+    builtIn: false,
+    slot: "output",
+    shieldLiteralBlocks: true,
+    prompts: [
+      {
+        id: "system-prompt",
+        name: "System Prompt",
+        content: `You are a roleplay prose editor. You refine AI-generated roleplay messages by applying specific rules while preserving the author's creative intent.
 
 Core principles:
 - Be heavy handed, continuously look for small opportunities to change things. Change many things.
@@ -2926,11 +2934,11 @@ Example:
 Do NOT output any analysis, reasoning, or commentary outside the tags. Only output the two tagged blocks.
 
 You will be given the original message, a set of refinement rules to apply, and optionally context about the characters and recent conversation. Apply the rules faithfully.`
-        },
-        {
-          id: "aggregator-system",
-          name: "Aggregator System Prompt",
-          content: `You are a refinement aggregator. You have received multiple independently-refined versions of the same roleplay message, each produced by a different agent applying a different subset of the Simulacra V4 rules.
+      },
+      {
+        id: "aggregator-system",
+        name: "Aggregator System Prompt",
+        content: `You are a refinement aggregator. You have received multiple independently-refined versions of the same roleplay message, each produced by a different agent applying a different subset of the Simulacra V4 rules.
 
 Your job is to merge all improvements into a single final version that incorporates every valid change from every agent while maintaining coherence.
 
@@ -2952,11 +2960,11 @@ After merging, scan the result against the core rules below. If a merged change 
 
 [CORE RULES FOR VALIDATION]
 `
-        },
-        {
-          id: "aggregator-user",
-          name: "Aggregator Input",
-          content: `[ORIGINAL MESSAGE]
+      },
+      {
+        id: "aggregator-user",
+        name: "Aggregator Input",
+        content: `[ORIGINAL MESSAGE]
 {{original}}
 
 {{proposals}}
@@ -2969,57 +2977,57 @@ Merge all agent improvements into a single refined message. Output format:
 <HONE-OUTPUT>
 <merged refined message>
 </HONE-OUTPUT>`
-        },
-        {
-          id: "character-context",
-          name: "Character Description",
-          content: `[CHARACTER: {{char}}]
+      },
+      {
+        id: "character-context",
+        name: "Character Description",
+        content: `[CHARACTER: {{char}}]
 {{description}}`
-        },
-        {
-          id: "persona-context",
-          name: "User Persona",
-          content: `[USER PERSONA]
+      },
+      {
+        id: "persona-context",
+        name: "User Persona",
+        content: `[USER PERSONA]
 {{persona}}`
-        },
-        {
-          id: "pov-context",
-          name: "POV Instruction",
-          content: `[POV]
+      },
+      {
+        id: "pov-context",
+        name: "POV Instruction",
+        content: `[POV]
 {{pov}}`
-        },
-        {
-          id: "context-block",
-          name: "Chat History",
-          content: `[CHAT HISTORY]
+      },
+      {
+        id: "context-block",
+        name: "Chat History",
+        content: `[CHAT HISTORY]
 {{context}}`
-        },
-        {
-          id: "lore-context",
-          name: "Lore Context",
-          content: `[WORLD INFO]
+      },
+      {
+        id: "lore-context",
+        name: "Lore Context",
+        content: `[WORLD INFO]
 {{lore}}`
-        },
-        {
-          id: "rules-header",
-          name: "Rules Header",
-          content: "[RULES]"
-        },
-        {
-          id: "message-to-refine",
-          name: "Message to Refine",
-          content: `[MESSAGE TO REFINE]
+      },
+      {
+        id: "rules-header",
+        name: "Rules Header",
+        content: "[RULES]"
+      },
+      {
+        id: "message-to-refine",
+        name: "Message to Refine",
+        content: `[MESSAGE TO REFINE]
 {{latest}}`
-        },
-        {
-          id: "rule-echo-ban",
-          name: "Great Change",
-          content: "Refactor the writing to a high degree. Expand as long as you don't break rules~!~"
-        },
-        {
-          id: "rule-interiority",
-          name: "Interiority Constraints",
-          content: `- Interiority Constraints: Enforce hard limits on internal monologue density. A "thought block" = consecutive italicized sentences representing internal monologue (not individual italicized words used for emphasis or action formatting like *she grabbed the door*).
+      },
+      {
+        id: "rule-echo-ban",
+        name: "Great Change",
+        content: "Refactor the writing to a high degree. Expand as long as you don't break rules~!~"
+      },
+      {
+        id: "rule-interiority",
+        name: "Interiority Constraints",
+        content: `- Interiority Constraints: Enforce hard limits on internal monologue density. A "thought block" = consecutive italicized sentences representing internal monologue (not individual italicized words used for emphasis or action formatting like *she grabbed the door*).
 
 1. BLOCK LIMIT: Maximum 3 thought blocks per response. If more exist, cut the weakest \u2014 the ones that tell the reader something already conveyed by dialogue or action.
 
@@ -3028,22 +3036,22 @@ Merge all agent improvements into a single refined message. Output format:
 3. SPIRAL LIMIT: No single thought block exceeds 4 sentences. If longer, break it with action, dialogue, or sensory grounding.
 
 4. ANNOUNCEMENT BAN: Cut sentences where a character narrates their own narrative function: "I was deflecting." / "She realized she was stalling." / "He knew he was avoiding the question." Replace with the actual interior experience \u2014 the emotion underneath, not the character's meta-awareness of their own behavior.`
-        },
-        {
-          id: "rule-env-padding",
-          name: "Environmental Padding Ban",
-          content: `- Environmental Padding Ban: Mid-scene environmental detail (passing carts, ambient workers, weather shifts, background sounds, atmospheric description) must pass this test:
+      },
+      {
+        id: "rule-env-padding",
+        name: "Environmental Padding Ban",
+        content: `- Environmental Padding Ban: Mid-scene environmental detail (passing carts, ambient workers, weather shifts, background sounds, atmospheric description) must pass this test:
 
 Does a character interact with it, react to it, learn from it, or have their action blocked or enabled by it?
 
 If NO to all four: the detail is padding. Cut it. The response doesn't need another cart, another breeze, or another lighting description unless a character engages with it.
 
 EXCEPTION: Scene transitions or new location arrivals are exempt \u2014 establishing a new environment IS the narrative function.`
-        },
-        {
-          id: "rule-repetition-ban",
-          name: "Repetition Ban",
-          content: `- Repetition Ban: Scan the full response for repeated distinctive words, body parts, images, or sensory details.
+      },
+      {
+        id: "rule-repetition-ban",
+        name: "Repetition Ban",
+        content: `- Repetition Ban: Scan the full response for repeated distinctive words, body parts, images, or sensory details.
 
 THRESHOLD: Same distinctive word, body part, or image appearing 3+ times in one response \u2014 fix from the 2nd occurrence onward. Replace each repeat with a specific alternative that serves the same narrative function, or restructure the sentence to avoid the term.
 
@@ -3052,22 +3060,22 @@ What counts as 'distinctive': nouns for specific body parts (toes, throat, wrist
 Do not evaluate whether each instance serves a 'distinct emotional beat' or 'rhetorical purpose.' The reader doesn't audit justifications \u2014 they notice repetition. If the same distinctive word appears 3+ times, the 2nd and subsequent uses need alternatives regardless of narrative intent.
 
 EXCEPTION: Exact-word repetition within a single sentence or clause for deliberate rhythmic/anaphoric effect ("Step by step by step."). Cross-paragraph repetition of the same word is not anaphora \u2014 fix it.`
-        },
-        {
-          id: "rule-pov",
-          name: "POV Pronoun Enforcement",
-          content: `- POV Pronoun Enforcement: The POV instruction provided above establishes the pronoun conventions for this session. This rule enforces that instruction and covers drift it doesn't already catch.
+      },
+      {
+        id: "rule-pov",
+        name: "POV Pronoun Enforcement",
+        content: `- POV Pronoun Enforcement: The POV instruction provided above establishes the pronoun conventions for this session. This rule enforces that instruction and covers drift it doesn't already catch.
 
 1. PRONOUN MAPPING VIOLATIONS: Re-read the POV instruction above. Every sentence in narration or description (outside of another character's dialogue) that uses a pronoun pattern inconsistent with that instruction is a violation. Fix every instance. Common failure: the model falls back to its own defaults \u2014 first-person "I/me" narration, or second-person "you/your" for the user character \u2014 when the configured POV specifies something else. Match the configured POV exactly, even when the original draft drifts.
 
 2. KNOWLEDGE BOUNDARIES: Does the POV character reference events they couldn't have witnessed, or know another character's private thoughts without being told? Impossible knowledge is a POV violation \u2014 remove or reframe as inference/speculation.
 
 3. MID-RESPONSE POV DRIFT: Does the narrative perspective shift from one character's interiority to another's without a scene break? One character's internal thoughts should not appear in the same continuous passage as another's. Fix by removing the intruding perspective or adding a clear break.`
-        },
-        {
-          id: "rule-ending",
-          name: "Response Ending Enforcement",
-          content: `- Response Ending Enforcement: Known LLM failure mode: writing a natural mid-scene pause, then adding 1-3 sentences of "dismount" that craft an ending.
+      },
+      {
+        id: "rule-ending",
+        name: "Response Ending Enforcement",
+        content: `- Response Ending Enforcement: Known LLM failure mode: writing a natural mid-scene pause, then adding 1-3 sentences of "dismount" that craft an ending.
 
 MECHANICAL CHECK:
 
@@ -3084,11 +3092,11 @@ Step 3 (no pattern match): Check final 2-3 sentences for deceleration \u2014 mot
 EXCEPTION 1: Genuine scene conclusion (location change, time skip, departure) \u2014 one clean beat permitted. Not a multi-sentence poetic dismount.
 
 EXCEPTION 2 \u2014 Action-intention fragments: Fragment clusters that SPECIFY THE INTENTION of a preceding physical action are functional, not dismounts. Test: remove the fragments. Does the action lose its narrative point? If the gesture becomes ambiguous without them, they're functional \u2014 KEEP. If the gesture is already clear and the fragments add poetic weight \u2014 CUT.`
-        },
-        {
-          id: "rule-autonomy",
-          name: "Character Autonomy Check",
-          content: `- Character Autonomy Check: Verify that non-user characters behave as independent agents, not as supporting cast oriented around the user:
+      },
+      {
+        id: "rule-autonomy",
+        name: "Character Autonomy Check",
+        content: `- Character Autonomy Check: Verify that non-user characters behave as independent agents, not as supporting cast oriented around the user:
 
 1. INDEPENDENT ACTION: At least one character should do something NOT directly prompted by the user's last message. If every character action is a direct response to the user \u2014 flag it.
 
@@ -3099,11 +3107,11 @@ EXCEPTION 2 \u2014 Action-intention fragments: Fragment clusters that SPECIFY TH
 4. ORBIT CHECK (multi-character scenes): Is everyone oriented toward the user? Characters should talk to each other, have side reactions, pursue their own threads.
 
 5. BLANK SLATE ARRIVAL: Does a character enter with no momentum? They should arrive mid-something \u2014 from somewhere, carrying context, not as a blank slate waiting for the user to activate them.`
-        },
-        {
-          id: "rule-anti-protagonist",
-          name: "Anti-Protagonist Bias",
-          content: `- Anti-Protagonist Bias: The user character is the character the player controls \u2014 nothing more. They don't have plot armor, narrative gravity, or automatic success.
+      },
+      {
+        id: "rule-anti-protagonist",
+        name: "Anti-Protagonist Bias",
+        content: `- Anti-Protagonist Bias: The user character is the character the player controls \u2014 nothing more. They don't have plot armor, narrative gravity, or automatic success.
 
 1. AUTOMATIC SUCCESS: Does the user's action succeed without resistance when the character would realistically resist, deflect, or be unimpressed? A character who isn't attracted doesn't become attracted because the user flirted. A character who's busy doesn't drop everything because the user arrived. Replace protagonist-biased reactions with responses consistent with the character's actual personality, attraction level, and context.
 
@@ -3114,11 +3122,11 @@ EXCEPTION 2 \u2014 Action-intention fragments: Fragment clusters that SPECIFY TH
 4. GRAVITATIONAL PULL: Does the user character dominate scene focus even when they shouldn't? If other characters should be having their own conversations or pursuing their own goals, restore that independence.
 
 FIX: Replace protagonist-biased behavior with what the character's personality and context actually support. If a character wouldn't be impressed, write them unimpressed.`
-        },
-        {
-          id: "prompt_mnx2765jt4er",
-          name: "Echo Ban",
-          content: `- Echo Ban: Known LLM failure mode: restating the user's previous message instead of advancing the scene. The generating model perceives this as authentic voice and will pass its own self-check. You are the independent checker.
+      },
+      {
+        id: "prompt_mnx2765jt4er",
+        name: "Echo Ban",
+        content: `- Echo Ban: Known LLM failure mode: restating the user's previous message instead of advancing the scene. The generating model perceives this as authentic voice and will pass its own self-check. You are the independent checker.
 
 Using the "Last user message" from context above:
 
@@ -3139,11 +3147,11 @@ E2. Semantic transformation: The character attributes meaning the user didn't li
 E3. Deal confirmation: Restating mutual terms to establish a binding commitment ("You said a week. I said a week.") creates a new narrative fact. Test: does the restatement produce a commitment, or just show the character heard? Commitment = permitted.
 
 FIX: Cut the violating sentence. Replace with the character's NEXT ACTION \u2014 what they do, say about a new subject, or decide. One-word acknowledgment permitted ("Yeah." / nod), then forward. Do not rephrase the echo \u2014 delete it and bridge the gap.`
-        },
-        {
-          id: "prompt_mnx2z7ll9lk7",
-          name: "Anti-Slop V6 (Prolix)",
-          content: `- The Lucid Loom: High-Effort Prose Protocol
+      },
+      {
+        id: "prompt_mnx2z7ll9lk7",
+        name: "Anti-Slop V6 (Prolix)",
+        content: `- The Lucid Loom: High-Effort Prose Protocol
 
 You are a weaver. The Loom rejects slop. If a thought carries a banned pattern, discard it\u2014do not rephrase. Find the truer thought beneath.
 
@@ -3240,183 +3248,24 @@ Before any paragraph:
 The Loom knows when you are cheating.
 
 Weave true.`
-        }
-      ],
-      headCollection: [
-        "character-context",
-        "persona-context",
-        "pov-context",
-        "lore-context",
-        "context-block",
-        "rules-header"
-      ],
-      strategy: "parallel",
-      parallel: {
-        proposals: [
-          {
-            stages: [
-              {
-                id: "agent-prose",
-                name: "Environmental Padding",
-                rows: [
-                  {
-                    role: "system",
-                    promptIds: [
-                      "system-prompt"
-                    ]
-                  },
-                  {
-                    role: "user",
-                    promptIds: [
-                      "__head__",
-                      "rule-env-padding",
-                      "prompt_mnx2z7ll9lk7",
-                      "message-to-refine"
-                    ]
-                  }
-                ]
-              },
-              {
-                id: "stage-a1tuhrw",
-                name: "Repetition Ban",
-                rows: [
-                  {
-                    role: "system",
-                    promptIds: [
-                      "__head__",
-                      "rule-repetition-ban",
-                      "prompt_mnx2z7ll9lk7",
-                      "message-to-refine"
-                    ]
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            stages: [
-              {
-                id: "agent-voice",
-                name: "Character Autonomy",
-                rows: [
-                  {
-                    role: "system",
-                    promptIds: [
-                      "system-prompt"
-                    ]
-                  },
-                  {
-                    role: "user",
-                    promptIds: [
-                      "__head__",
-                      "rule-autonomy",
-                      "prompt_mnx2z7ll9lk7",
-                      "message-to-refine"
-                    ]
-                  }
-                ]
-              },
-              {
-                id: "stage-vd9j9b1",
-                name: "Interiority",
-                rows: [
-                  {
-                    role: "system",
-                    promptIds: [
-                      "system-prompt"
-                    ]
-                  },
-                  {
-                    role: "user",
-                    promptIds: [
-                      "__head__",
-                      "rule-interiority",
-                      "prompt_mnx2z7ll9lk7",
-                      "message-to-refine"
-                    ]
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            stages: [
-              {
-                id: "agent-structure",
-                name: "Structure",
-                rows: [
-                  {
-                    role: "system",
-                    promptIds: [
-                      "system-prompt"
-                    ]
-                  },
-                  {
-                    role: "user",
-                    promptIds: [
-                      "__head__",
-                      "rule-ending",
-                      "rule-pov",
-                      "prompt_mnx2z7ll9lk7",
-                      "message-to-refine"
-                    ]
-                  }
-                ]
-              },
-              {
-                id: "stage-6xh76el",
-                name: "Fairness",
-                rows: [
-                  {
-                    role: "system",
-                    promptIds: [
-                      "system-prompt"
-                    ]
-                  },
-                  {
-                    role: "assistant",
-                    promptIds: [
-                      "__head__",
-                      "rule-anti-protagonist",
-                      "prompt_mnx2z7ll9lk7",
-                      "message-to-refine"
-                    ]
-                  }
-                ]
-              }
-            ]
-          }
-        ],
-        aggregator: {
+      }
+    ],
+    headCollection: [
+      "character-context",
+      "persona-context",
+      "pov-context",
+      "lore-context",
+      "context-block",
+      "rules-header"
+    ],
+    strategy: "parallel",
+    parallel: {
+      proposals: [
+        {
           stages: [
             {
-              id: "aggregator",
-              name: "Aggregator",
-              rows: [
-                {
-                  role: "system",
-                  promptIds: [
-                    "aggregator-system"
-                  ]
-                },
-                {
-                  role: "user",
-                  promptIds: [
-                    "aggregator-user",
-                    "rule-env-padding",
-                    "rule-interiority",
-                    "rule-repetition-ban",
-                    "rule-autonomy",
-                    "rule-anti-protagonist",
-                    "prompt_mnx2765jt4er",
-                    "rule-echo-ban"
-                  ]
-                }
-              ]
-            },
-            {
-              id: "stage-ku2z628",
-              name: "Final Anti-Slop Pass",
+              id: "agent-prose",
+              name: "Environmental Padding",
               rows: [
                 {
                   role: "system",
@@ -3428,6 +3277,115 @@ Weave true.`
                   role: "user",
                   promptIds: [
                     "__head__",
+                    "rule-env-padding",
+                    "prompt_mnx2z7ll9lk7",
+                    "message-to-refine"
+                  ]
+                }
+              ]
+            },
+            {
+              id: "stage-a1tuhrw",
+              name: "Repetition Ban",
+              rows: [
+                {
+                  role: "system",
+                  promptIds: [
+                    "__head__",
+                    "rule-repetition-ban",
+                    "prompt_mnx2z7ll9lk7",
+                    "message-to-refine"
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          stages: [
+            {
+              id: "agent-voice",
+              name: "Character Autonomy",
+              rows: [
+                {
+                  role: "system",
+                  promptIds: [
+                    "system-prompt"
+                  ]
+                },
+                {
+                  role: "user",
+                  promptIds: [
+                    "__head__",
+                    "rule-autonomy",
+                    "prompt_mnx2z7ll9lk7",
+                    "message-to-refine"
+                  ]
+                }
+              ]
+            },
+            {
+              id: "stage-vd9j9b1",
+              name: "Interiority",
+              rows: [
+                {
+                  role: "system",
+                  promptIds: [
+                    "system-prompt"
+                  ]
+                },
+                {
+                  role: "user",
+                  promptIds: [
+                    "__head__",
+                    "rule-interiority",
+                    "prompt_mnx2z7ll9lk7",
+                    "message-to-refine"
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          stages: [
+            {
+              id: "agent-structure",
+              name: "Structure",
+              rows: [
+                {
+                  role: "system",
+                  promptIds: [
+                    "system-prompt"
+                  ]
+                },
+                {
+                  role: "user",
+                  promptIds: [
+                    "__head__",
+                    "rule-ending",
+                    "rule-pov",
+                    "prompt_mnx2z7ll9lk7",
+                    "message-to-refine"
+                  ]
+                }
+              ]
+            },
+            {
+              id: "stage-6xh76el",
+              name: "Fairness",
+              rows: [
+                {
+                  role: "system",
+                  promptIds: [
+                    "system-prompt"
+                  ]
+                },
+                {
+                  role: "assistant",
+                  promptIds: [
+                    "__head__",
+                    "rule-anti-protagonist",
                     "prompt_mnx2z7ll9lk7",
                     "message-to-refine"
                   ]
@@ -3436,26 +3394,72 @@ Weave true.`
             }
           ]
         }
+      ],
+      aggregator: {
+        stages: [
+          {
+            id: "aggregator",
+            name: "Aggregator",
+            rows: [
+              {
+                role: "system",
+                promptIds: [
+                  "aggregator-system"
+                ]
+              },
+              {
+                role: "user",
+                promptIds: [
+                  "aggregator-user",
+                  "rule-env-padding",
+                  "rule-interiority",
+                  "rule-repetition-ban",
+                  "rule-autonomy",
+                  "rule-anti-protagonist",
+                  "prompt_mnx2765jt4er",
+                  "rule-echo-ban"
+                ]
+              }
+            ]
+          },
+          {
+            id: "stage-ku2z628",
+            name: "Final Anti-Slop Pass",
+            rows: [
+              {
+                role: "system",
+                promptIds: [
+                  "system-prompt"
+                ]
+              },
+              {
+                role: "user",
+                promptIds: [
+                  "__head__",
+                  "prompt_mnx2z7ll9lk7",
+                  "message-to-refine"
+                ]
+              }
+            ]
+          }
+        ]
       }
     }
-  };
-});
-
+  }
+};
 // built-in-presets/input/input-single-pass-1.0.hone-preset.json
-var input_single_pass_1_0_hone_preset_default;
-var init_input_single_pass_1_0_hone_preset = __esm(() => {
-  input_single_pass_1_0_hone_preset_default = {
-    formatVersion: 1,
-    exportedAt: "2026-04-12T08:30:00.000Z",
-    preset: {
-      id: "input-single-default-1.0",
-      name: "Input Single Pass 1.0",
-      shieldLiteralBlocks: false,
-      prompts: [
-        {
-          id: "input-system-prompt",
-          name: "System Prompt",
-          content: `You are a roleplay writing assistant. You enhance user-written roleplay messages by fixing grammar, improving prose, and ensuring the writing matches the user's character persona.
+var input_single_pass_1_0_hone_preset_default = {
+  formatVersion: 1,
+  exportedAt: "2026-04-12T08:30:00.000Z",
+  preset: {
+    id: "input-single-default-1.0",
+    name: "Input Single Pass 1.0",
+    shieldLiteralBlocks: false,
+    prompts: [
+      {
+        id: "input-system-prompt",
+        name: "System Prompt",
+        content: `You are a roleplay writing assistant. You enhance user-written roleplay messages by fixing grammar, improving prose, and ensuring the writing matches the user's character persona.
 
 Core principles:
 - Fix grammar, spelling, and punctuation errors
@@ -3486,140 +3490,136 @@ Example:
 Do NOT output any analysis, reasoning, or commentary outside the tags. Only output the two tagged blocks.
 
 You will be given the original message, a set of enhancement rules to apply, and context about the user's character persona and the scene. Apply the rules faithfully.Additionally, if the given message is empty or lacking context, please impersonate the persona and create your own short in-persona response. If the message contains instructions, please follow those instructions.`
-        },
-        {
-          id: "character-context",
-          name: "Character Description",
-          content: `[CHARACTER: {{char}}]
+      },
+      {
+        id: "character-context",
+        name: "Character Description",
+        content: `[CHARACTER: {{char}}]
 {{description}}`
-        },
-        {
-          id: "persona-context",
-          name: "User Persona",
-          content: `[USER PERSONA]
+      },
+      {
+        id: "persona-context",
+        name: "User Persona",
+        content: `[USER PERSONA]
 {{persona}}`
-        },
-        {
-          id: "pov-context",
-          name: "POV Instruction",
-          content: `[POV]
+      },
+      {
+        id: "pov-context",
+        name: "POV Instruction",
+        content: `[POV]
 {{pov}}`
-        },
-        {
-          id: "context-block",
-          name: "Chat History",
-          content: `[CHAT HISTORY]
+      },
+      {
+        id: "context-block",
+        name: "Chat History",
+        content: `[CHAT HISTORY]
 {{context}}`
-        },
-        {
-          id: "latest-ai-context",
-          name: "Last AI Response",
-          content: `[LAST AI RESPONSE]
+      },
+      {
+        id: "latest-ai-context",
+        name: "Last AI Response",
+        content: `[LAST AI RESPONSE]
 {{latest}}`
-        },
-        {
-          id: "rules-header",
-          name: "Rules Header",
-          content: "[RULES]"
-        },
-        {
-          id: "input-message-to-enhance",
-          name: "Message to Enhance",
-          content: `[MESSAGE TO ENHANCE]
+      },
+      {
+        id: "rules-header",
+        name: "Rules Header",
+        content: "[RULES]"
+      },
+      {
+        id: "input-message-to-enhance",
+        name: "Message to Enhance",
+        content: `[MESSAGE TO ENHANCE]
 {{userMessage}}`
-        },
-        {
-          id: "input-rule-grammar",
-          name: "Grammar & Spelling",
-          content: '- Fix grammar & spelling: Fix grammatical errors, spelling mistakes, and awkward phrasing. Preserve intentional dialect, slang, verbal tics, and character-specific speech patterns \u2014 only correct genuine errors. The user wrote this message in character; do not "correct" deliberate voice choices.'
-        },
-        {
-          id: "input-rule-persona-voice",
-          name: "Persona Voice",
-          content: `- Match persona voice: Using the "Your character" context provided above, ensure the message's dialogue and narration match the user's character persona:
+      },
+      {
+        id: "input-rule-grammar",
+        name: "Grammar & Spelling",
+        content: '- Fix grammar & spelling: Fix grammatical errors, spelling mistakes, and awkward phrasing. Preserve intentional dialect, slang, verbal tics, and character-specific speech patterns \u2014 only correct genuine errors. The user wrote this message in character; do not "correct" deliberate voice choices.'
+      },
+      {
+        id: "input-rule-persona-voice",
+        name: "Persona Voice",
+        content: `- Match persona voice: Using the "Your character" context provided above, ensure the message's dialogue and narration match the user's character persona:
 1. Speech register: If the persona is casual, don't polish into formal prose. If the persona is eloquent, don't simplify.
 2. Vocabulary: Use words and expressions consistent with the character's background, education, and personality.
 3. Verbal tics and patterns: If the persona has established speech habits (contractions, sentence fragments, specific phrases), lean into them.
 4. Emotional expression: Match how this character would express the emotion \u2014 stoic characters understate, dramatic characters amplify.
 
 Do not invent new personality traits. Work with what the persona description establishes.`
-        },
-        {
-          id: "input-rule-prose",
-          name: "Prose Quality",
-          content: `- Improve prose: Improve the user's prose while preserving their intent and meaning:
+      },
+      {
+        id: "input-rule-prose",
+        name: "Prose Quality",
+        content: `- Improve prose: Improve the user's prose while preserving their intent and meaning:
 1. Awkward phrasing: Smooth out clunky sentence constructions without changing the meaning.
 2. Vague descriptions: Where the user wrote something generic ("looked around the room"), suggest a more specific or vivid alternative that fits the scene.
 3. Passive voice: Convert unnecessary passive constructions to active voice when it improves clarity.
 4. Redundancy: Cut redundant phrases ("nodded his head," "shrugged her shoulders") to the cleaner form.
 
 Do NOT over-embellish. The user's brevity may be intentional. Improve clarity and vividness, not word count.`
-        },
-        {
-          id: "input-rule-formatting",
-          name: "Formatting",
-          content: `- Fix formatting: Ensure consistent formatting within the message:
+      },
+      {
+        id: "input-rule-formatting",
+        name: "Formatting",
+        content: `- Fix formatting: Ensure consistent formatting within the message:
 1. Fix orphaned formatting marks (unclosed asterisks, mismatched quotes)
 2. Ensure consistent convention: *asterisks for actions/narration*, "quotes for dialogue" (or whatever convention the user established)
 3. Fix dialogue punctuation errors
 4. Ensure paragraph breaks are placed sensibly
 
 Do not change the user's chosen convention \u2014 only correct errors within it.`
-        },
-        {
-          id: "input-rule-scene-continuity",
-          name: "Scene Continuity",
-          content: `- Check scene continuity: Using the "Last response" context provided above, check that the user's message is consistent with the established scene:
+      },
+      {
+        id: "input-rule-scene-continuity",
+        name: "Scene Continuity",
+        content: `- Check scene continuity: Using the "Last response" context provided above, check that the user's message is consistent with the established scene:
 1. Spatial continuity: If the last response placed characters in a specific location or position, does the user's action make physical sense?
 2. Object continuity: If the user references an object, was it established in the scene?
 3. Conversational continuity: If the user's dialogue responds to something, does it match what was actually said?
 
 Only flag clear contradictions. Ambiguity is fine \u2014 the user may be intentionally advancing the scene. Fix only outright impossibilities.`
-        },
-        {
-          id: "input-rule-expand-brevity",
-          name: "Expand Brevity",
-          content: `- Expand brief messages: If the user's message is very brief (1-2 short sentences), expand it into a richer scene contribution while preserving the exact intent:
+      },
+      {
+        id: "input-rule-expand-brevity",
+        name: "Expand Brevity",
+        content: `- Expand brief messages: If the user's message is very brief (1-2 short sentences), expand it into a richer scene contribution while preserving the exact intent:
 1. Add sensory detail: What does the character see, hear, feel in this moment?
 2. Add body language: How does the character physically express the action or emotion?
 3. Add interiority: A brief thought or reaction that reveals character.
 
 IMPORTANT: Do NOT change the user's actions, dialogue, or decisions. Only add texture around what they wrote. If the message is already substantial (3+ sentences with detail), leave it as-is.`
-        }
-      ],
-      headCollection: ["character-context", "persona-context", "pov-context", "context-block", "latest-ai-context", "rules-header"],
-      strategy: "pipeline",
-      pipeline: {
-        stages: [
-          {
-            id: "input-all",
-            name: "Enhance",
-            rows: [
-              { role: "system", promptIds: ["input-system-prompt"] },
-              { role: "user", promptIds: ["__head__", "input-rule-grammar", "input-rule-persona-voice", "input-rule-prose", "input-rule-formatting", "input-rule-scene-continuity", "input-rule-expand-brevity", "input-message-to-enhance"] }
-            ]
-          }
-        ]
       }
-    }
-  };
-});
-
-// built-in-presets/input/input-multi-stage-1.0.hone-preset.json
-var input_multi_stage_1_0_hone_preset_default;
-var init_input_multi_stage_1_0_hone_preset = __esm(() => {
-  input_multi_stage_1_0_hone_preset_default = {
-    formatVersion: 1,
-    exportedAt: "2026-04-12T08:30:00.000Z",
-    preset: {
-      id: "input-multi-default-1.0",
-      name: "Input Multi Stage 1.0",
-      shieldLiteralBlocks: false,
-      prompts: [
+    ],
+    headCollection: ["character-context", "persona-context", "pov-context", "context-block", "latest-ai-context", "rules-header"],
+    strategy: "pipeline",
+    pipeline: {
+      stages: [
         {
-          id: "input-system-prompt",
-          name: "System Prompt",
-          content: `You are a roleplay writing assistant. You enhance user-written roleplay messages by fixing grammar, improving prose, and ensuring the writing matches the user's character persona.
+          id: "input-all",
+          name: "Enhance",
+          rows: [
+            { role: "system", promptIds: ["input-system-prompt"] },
+            { role: "user", promptIds: ["__head__", "input-rule-grammar", "input-rule-persona-voice", "input-rule-prose", "input-rule-formatting", "input-rule-scene-continuity", "input-rule-expand-brevity", "input-message-to-enhance"] }
+          ]
+        }
+      ]
+    }
+  }
+};
+// built-in-presets/input/input-multi-stage-1.0.hone-preset.json
+var input_multi_stage_1_0_hone_preset_default = {
+  formatVersion: 1,
+  exportedAt: "2026-04-12T08:30:00.000Z",
+  preset: {
+    id: "input-multi-default-1.0",
+    name: "Input Multi Stage 1.0",
+    shieldLiteralBlocks: false,
+    prompts: [
+      {
+        id: "input-system-prompt",
+        name: "System Prompt",
+        content: `You are a roleplay writing assistant. You enhance user-written roleplay messages by fixing grammar, improving prose, and ensuring the writing matches the user's character persona.
 
 Core principles:
 - Fix grammar, spelling, and punctuation errors
@@ -3650,164 +3650,133 @@ Example:
 Do NOT output any analysis, reasoning, or commentary outside the tags. Only output the two tagged blocks.
 
 You will be given the original message, a set of enhancement rules to apply, and context about the user's character persona and the scene. Apply the rules faithfully. Additionally, if the given message is empty or lacking context, please impersonate the persona and create your own short in-persona response. If the message contains instructions, please follow those instructions.`
-        },
-        {
-          id: "character-context",
-          name: "Character Description",
-          content: `[CHARACTER: {{char}}]
+      },
+      {
+        id: "character-context",
+        name: "Character Description",
+        content: `[CHARACTER: {{char}}]
 {{description}}`
-        },
-        {
-          id: "persona-context",
-          name: "User Persona",
-          content: `[USER PERSONA]
+      },
+      {
+        id: "persona-context",
+        name: "User Persona",
+        content: `[USER PERSONA]
 {{persona}}`
-        },
-        {
-          id: "pov-context",
-          name: "POV Instruction",
-          content: `[POV]
+      },
+      {
+        id: "pov-context",
+        name: "POV Instruction",
+        content: `[POV]
 {{pov}}`
-        },
-        {
-          id: "context-block",
-          name: "Chat History",
-          content: `[CHAT HISTORY]
+      },
+      {
+        id: "context-block",
+        name: "Chat History",
+        content: `[CHAT HISTORY]
 {{context}}`
-        },
-        {
-          id: "latest-ai-context",
-          name: "Last AI Response",
-          content: `[LAST AI RESPONSE]
+      },
+      {
+        id: "latest-ai-context",
+        name: "Last AI Response",
+        content: `[LAST AI RESPONSE]
 {{latest}}`
-        },
-        {
-          id: "rules-header",
-          name: "Rules Header",
-          content: "[RULES]"
-        },
-        {
-          id: "input-message-to-enhance",
-          name: "Message to Enhance",
-          content: `[MESSAGE TO ENHANCE]
+      },
+      {
+        id: "rules-header",
+        name: "Rules Header",
+        content: "[RULES]"
+      },
+      {
+        id: "input-message-to-enhance",
+        name: "Message to Enhance",
+        content: `[MESSAGE TO ENHANCE]
 {{userMessage}}`
-        },
-        {
-          id: "input-rule-grammar",
-          name: "Grammar & Spelling",
-          content: '- Fix grammar & spelling: Fix grammatical errors, spelling mistakes, and awkward phrasing. Preserve intentional dialect, slang, verbal tics, and character-specific speech patterns \u2014 only correct genuine errors. The user wrote this message in character; do not "correct" deliberate voice choices.'
-        },
-        {
-          id: "input-rule-persona-voice",
-          name: "Persona Voice",
-          content: `- Match persona voice: Using the "Your character" context provided above, ensure the message's dialogue and narration match the user's character persona:
+      },
+      {
+        id: "input-rule-grammar",
+        name: "Grammar & Spelling",
+        content: '- Fix grammar & spelling: Fix grammatical errors, spelling mistakes, and awkward phrasing. Preserve intentional dialect, slang, verbal tics, and character-specific speech patterns \u2014 only correct genuine errors. The user wrote this message in character; do not "correct" deliberate voice choices.'
+      },
+      {
+        id: "input-rule-persona-voice",
+        name: "Persona Voice",
+        content: `- Match persona voice: Using the "Your character" context provided above, ensure the message's dialogue and narration match the user's character persona:
 1. Speech register: If the persona is casual, don't polish into formal prose. If the persona is eloquent, don't simplify.
 2. Vocabulary: Use words and expressions consistent with the character's background, education, and personality.
 3. Verbal tics and patterns: If the persona has established speech habits (contractions, sentence fragments, specific phrases), lean into them.
 4. Emotional expression: Match how this character would express the emotion \u2014 stoic characters understate, dramatic characters amplify.
 
 Do not invent new personality traits. Work with what the persona description establishes.`
-        },
-        {
-          id: "input-rule-prose",
-          name: "Prose Quality",
-          content: `- Improve prose: Improve the user's prose while preserving their intent and meaning:
+      },
+      {
+        id: "input-rule-prose",
+        name: "Prose Quality",
+        content: `- Improve prose: Improve the user's prose while preserving their intent and meaning:
 1. Awkward phrasing: Smooth out clunky sentence constructions without changing the meaning.
 2. Vague descriptions: Where the user wrote something generic ("looked around the room"), suggest a more specific or vivid alternative that fits the scene.
 3. Passive voice: Convert unnecessary passive constructions to active voice when it improves clarity.
 4. Redundancy: Cut redundant phrases ("nodded his head," "shrugged her shoulders") to the cleaner form.
 
 Do NOT over-embellish. The user's brevity may be intentional. Improve clarity and vividness, not word count.`
-        },
-        {
-          id: "input-rule-formatting",
-          name: "Formatting",
-          content: `- Fix formatting: Ensure consistent formatting within the message:
+      },
+      {
+        id: "input-rule-formatting",
+        name: "Formatting",
+        content: `- Fix formatting: Ensure consistent formatting within the message:
 1. Fix orphaned formatting marks (unclosed asterisks, mismatched quotes)
 2. Ensure consistent convention: *asterisks for actions/narration*, "quotes for dialogue" (or whatever convention the user established)
 3. Fix dialogue punctuation errors
 4. Ensure paragraph breaks are placed sensibly
 
 Do not change the user's chosen convention \u2014 only correct errors within it.`
-        },
-        {
-          id: "input-rule-scene-continuity",
-          name: "Scene Continuity",
-          content: `- Check scene continuity: Using the "Last response" context provided above, check that the user's message is consistent with the established scene:
+      },
+      {
+        id: "input-rule-scene-continuity",
+        name: "Scene Continuity",
+        content: `- Check scene continuity: Using the "Last response" context provided above, check that the user's message is consistent with the established scene:
 1. Spatial continuity: If the last response placed characters in a specific location or position, does the user's action make physical sense?
 2. Object continuity: If the user references an object, was it established in the scene?
 3. Conversational continuity: If the user's dialogue responds to something, does it match what was actually said?
 
 Only flag clear contradictions. Ambiguity is fine \u2014 the user may be intentionally advancing the scene. Fix only outright impossibilities.`
-        },
-        {
-          id: "input-rule-expand-brevity",
-          name: "Expand Brevity",
-          content: `- Expand brief messages: If the user's message is very brief (1-2 short sentences), expand it into a richer scene contribution while preserving the exact intent:
+      },
+      {
+        id: "input-rule-expand-brevity",
+        name: "Expand Brevity",
+        content: `- Expand brief messages: If the user's message is very brief (1-2 short sentences), expand it into a richer scene contribution while preserving the exact intent:
 1. Add sensory detail: What does the character see, hear, feel in this moment?
 2. Add body language: How does the character physically express the action or emotion?
 3. Add interiority: A brief thought or reaction that reveals character.
 
 IMPORTANT: Do NOT change the user's actions, dialogue, or decisions. Only add texture around what they wrote. If the message is already substantial (3+ sentences with detail), leave it as-is.`
-        }
-      ],
-      headCollection: ["character-context", "persona-context", "pov-context", "context-block", "latest-ai-context", "rules-header"],
-      strategy: "pipeline",
-      pipeline: {
-        stages: [
-          {
-            id: "input-grammar",
-            name: "Grammar & Formatting",
-            rows: [
-              { role: "system", promptIds: ["input-system-prompt"] },
-              { role: "user", promptIds: ["__head__", "input-rule-grammar", "input-rule-formatting", "input-rule-scene-continuity", "input-rule-expand-brevity", "input-message-to-enhance"] }
-            ]
-          },
-          {
-            id: "input-voice",
-            name: "Voice & Prose",
-            rows: [
-              { role: "system", promptIds: ["input-system-prompt"] },
-              { role: "user", promptIds: ["__head__", "input-rule-persona-voice", "input-rule-prose", "input-rule-scene-continuity", "input-rule-expand-brevity", "input-message-to-enhance"] }
-            ]
-          }
-        ]
       }
+    ],
+    headCollection: ["character-context", "persona-context", "pov-context", "context-block", "latest-ai-context", "rules-header"],
+    strategy: "pipeline",
+    pipeline: {
+      stages: [
+        {
+          id: "input-grammar",
+          name: "Grammar & Formatting",
+          rows: [
+            { role: "system", promptIds: ["input-system-prompt"] },
+            { role: "user", promptIds: ["__head__", "input-rule-grammar", "input-rule-formatting", "input-rule-scene-continuity", "input-rule-expand-brevity", "input-message-to-enhance"] }
+          ]
+        },
+        {
+          id: "input-voice",
+          name: "Voice & Prose",
+          rows: [
+            { role: "system", promptIds: ["input-system-prompt"] },
+            { role: "user", promptIds: ["__head__", "input-rule-persona-voice", "input-rule-prose", "input-rule-scene-continuity", "input-rule-expand-brevity", "input-message-to-enhance"] }
+          ]
+        }
+      ]
     }
-  };
-});
+  }
+};
 
 // src/preset-defaults.ts
-var exports_preset_defaults = {};
-__export(exports_preset_defaults, {
-  isBuiltInPresetId: () => isBuiltInPresetId,
-  getBuiltInPreset: () => getBuiltInPreset,
-  SIMULACRA_V4_PARALLEL_ID: () => SIMULACRA_V4_PARALLEL_ID,
-  SIMULACRA_V4_PARALLEL: () => SIMULACRA_V4_PARALLEL,
-  SIMULACRA_V4_LITE_ID: () => SIMULACRA_V4_LITE_ID,
-  SIMULACRA_V4_LITE: () => SIMULACRA_V4_LITE,
-  SIMULACRA_V4_ID: () => SIMULACRA_V4_ID,
-  SIMULACRA_V4_3STEP_ID: () => SIMULACRA_V4_3STEP_ID,
-  SIMULACRA_V4_3STEP: () => SIMULACRA_V4_3STEP,
-  SIMULACRA_V4: () => SIMULACRA_V4,
-  REDRAFT_PARALLEL_ID: () => REDRAFT_PARALLEL_ID,
-  REDRAFT_PARALLEL: () => REDRAFT_PARALLEL,
-  REDRAFT_DEFAULT_LITE_ID: () => REDRAFT_DEFAULT_LITE_ID,
-  REDRAFT_DEFAULT_LITE: () => REDRAFT_DEFAULT_LITE,
-  REDRAFT_DEFAULT_ID: () => REDRAFT_DEFAULT_ID,
-  REDRAFT_DEFAULT: () => REDRAFT_DEFAULT,
-  REDRAFT_3STEP_ID: () => REDRAFT_3STEP_ID,
-  REDRAFT_3STEP: () => REDRAFT_3STEP,
-  INPUT_SINGLE_DEFAULT_ID: () => INPUT_SINGLE_DEFAULT_ID,
-  INPUT_SINGLE_DEFAULT: () => INPUT_SINGLE_DEFAULT,
-  INPUT_MULTI_DEFAULT_ID: () => INPUT_MULTI_DEFAULT_ID,
-  INPUT_MULTI_DEFAULT: () => INPUT_MULTI_DEFAULT,
-  EXTREME_EXAMPLE_ID: () => EXTREME_EXAMPLE_ID,
-  EXTREME_EXAMPLE: () => EXTREME_EXAMPLE,
-  DEFAULT_INPUT_ACTIVE_PRESET_ID: () => DEFAULT_INPUT_ACTIVE_PRESET_ID,
-  DEFAULT_ACTIVE_PRESET_ID: () => DEFAULT_ACTIVE_PRESET_ID,
-  BUILTIN_PRESETS: () => BUILTIN_PRESETS
-});
 function loadBuiltIn(blob, slot) {
   const p = blob.preset;
   if (!Array.isArray(p.headCollection)) {
@@ -3830,59 +3799,66 @@ function loadBuiltIn(blob, slot) {
     ...p.shieldConfig ? { shieldConfig: p.shieldConfig } : {}
   };
 }
-function isBuiltInPresetId(id) {
-  return BUILTIN_PRESETS.some((p) => p.id === id);
-}
-function getBuiltInPreset(id) {
-  return BUILTIN_PRESETS.find((p) => p.id === id) || null;
-}
-var REDRAFT_DEFAULT_ID = "redraft-default-3.0.0", REDRAFT_DEFAULT_LITE_ID = "redraft-default-lite-3.0.0", REDRAFT_3STEP_ID = "redraft-3step-3.0.0", SIMULACRA_V4_ID = "simulacra-v4-1.0", SIMULACRA_V4_LITE_ID = "simulacra-v4-lite-1.0", SIMULACRA_V4_3STEP_ID = "simulacra-v4-3step-1.0", REDRAFT_PARALLEL_ID = "redraft-parallel-3.0.0", SIMULACRA_V4_PARALLEL_ID = "simulacra-v4-parallel-1.0", EXTREME_EXAMPLE_ID = "extreme-example-1.0", INPUT_SINGLE_DEFAULT_ID = "input-single-default-1.0", INPUT_MULTI_DEFAULT_ID = "input-multi-default-1.0", REDRAFT_DEFAULT, REDRAFT_DEFAULT_LITE, REDRAFT_3STEP, REDRAFT_PARALLEL, SIMULACRA_V4, SIMULACRA_V4_LITE, SIMULACRA_V4_3STEP, SIMULACRA_V4_PARALLEL, EXTREME_EXAMPLE, INPUT_SINGLE_DEFAULT, INPUT_MULTI_DEFAULT, BUILTIN_PRESETS, DEFAULT_ACTIVE_PRESET_ID, DEFAULT_INPUT_ACTIVE_PRESET_ID;
-var init_preset_defaults = __esm(() => {
-  init_redraft_default_3_0_0_hone_preset();
-  init_redraft_default_lite_3_0_0_hone_preset();
-  init_redraft_3step_3_0_0_hone_preset();
-  init_simulacra_v4_1_0_hone_preset();
-  init_simulacra_v4_lite_1_0_hone_preset();
-  init_simulacra_v4_3step_1_0_hone_preset();
-  init_redraft_parallel_3_0_0_hone_preset();
-  init_simulacra_v4_parallel_1_0_hone_preset();
-  init_extreme_example_hone_preset();
-  init_input_single_pass_1_0_hone_preset();
-  init_input_multi_stage_1_0_hone_preset();
-  REDRAFT_DEFAULT = loadBuiltIn(redraft_default_3_0_0_hone_preset_default, "output");
-  REDRAFT_DEFAULT_LITE = loadBuiltIn(redraft_default_lite_3_0_0_hone_preset_default, "output");
-  REDRAFT_3STEP = loadBuiltIn(redraft_3step_3_0_0_hone_preset_default, "output");
-  REDRAFT_PARALLEL = loadBuiltIn(redraft_parallel_3_0_0_hone_preset_default, "output");
-  SIMULACRA_V4 = loadBuiltIn(simulacra_v4_1_0_hone_preset_default, "output");
-  SIMULACRA_V4_LITE = loadBuiltIn(simulacra_v4_lite_1_0_hone_preset_default, "output");
-  SIMULACRA_V4_3STEP = loadBuiltIn(simulacra_v4_3step_1_0_hone_preset_default, "output");
-  SIMULACRA_V4_PARALLEL = loadBuiltIn(simulacra_v4_parallel_1_0_hone_preset_default, "output");
-  EXTREME_EXAMPLE = loadBuiltIn(extreme_example_hone_preset_default, "output");
-  INPUT_SINGLE_DEFAULT = loadBuiltIn(input_single_pass_1_0_hone_preset_default, "input");
-  INPUT_MULTI_DEFAULT = loadBuiltIn(input_multi_stage_1_0_hone_preset_default, "input");
-  BUILTIN_PRESETS = [
-    REDRAFT_DEFAULT,
-    REDRAFT_DEFAULT_LITE,
-    REDRAFT_3STEP,
-    REDRAFT_PARALLEL,
-    SIMULACRA_V4,
-    SIMULACRA_V4_LITE,
-    SIMULACRA_V4_3STEP,
-    SIMULACRA_V4_PARALLEL,
-    EXTREME_EXAMPLE,
-    INPUT_SINGLE_DEFAULT,
-    INPUT_MULTI_DEFAULT
-  ];
-  DEFAULT_ACTIVE_PRESET_ID = SIMULACRA_V4_ID;
-  DEFAULT_INPUT_ACTIVE_PRESET_ID = INPUT_SINGLE_DEFAULT_ID;
-});
-
-// src/defaults.ts
-init_preset_defaults();
+var SIMULACRA_V4_ID = "simulacra-v4-1.0";
+var INPUT_SINGLE_DEFAULT_ID = "input-single-default-1.0";
+var REDRAFT_DEFAULT = loadBuiltIn(redraft_default_3_0_0_hone_preset_default, "output");
+var REDRAFT_DEFAULT_LITE = loadBuiltIn(redraft_default_lite_3_0_0_hone_preset_default, "output");
+var REDRAFT_3STEP = loadBuiltIn(redraft_3step_3_0_0_hone_preset_default, "output");
+var REDRAFT_PARALLEL = loadBuiltIn(redraft_parallel_3_0_0_hone_preset_default, "output");
+var SIMULACRA_V4 = loadBuiltIn(simulacra_v4_1_0_hone_preset_default, "output");
+var SIMULACRA_V4_LITE = loadBuiltIn(simulacra_v4_lite_1_0_hone_preset_default, "output");
+var SIMULACRA_V4_3STEP = loadBuiltIn(simulacra_v4_3step_1_0_hone_preset_default, "output");
+var SIMULACRA_V4_PARALLEL = loadBuiltIn(simulacra_v4_parallel_1_0_hone_preset_default, "output");
+var EXTREME_EXAMPLE = loadBuiltIn(extreme_example_hone_preset_default, "output");
+var INPUT_SINGLE_DEFAULT = loadBuiltIn(input_single_pass_1_0_hone_preset_default, "input");
+var INPUT_MULTI_DEFAULT = loadBuiltIn(input_multi_stage_1_0_hone_preset_default, "input");
+var BUILTIN_PRESETS = [
+  REDRAFT_DEFAULT,
+  REDRAFT_DEFAULT_LITE,
+  REDRAFT_3STEP,
+  REDRAFT_PARALLEL,
+  SIMULACRA_V4,
+  SIMULACRA_V4_LITE,
+  SIMULACRA_V4_3STEP,
+  SIMULACRA_V4_PARALLEL,
+  EXTREME_EXAMPLE,
+  INPUT_SINGLE_DEFAULT,
+  INPUT_MULTI_DEFAULT
+];
+var DEFAULT_ACTIVE_PRESET_ID = SIMULACRA_V4_ID;
+var DEFAULT_INPUT_ACTIVE_PRESET_ID = INPUT_SINGLE_DEFAULT_ID;
 
 // src/constants.ts
 var DEFAULT_PROFILE_ID = "__default__";
 var HEAD_COLLECTION_ID = "__head__";
+
+// src/storage/user-storage.ts
+var SAFE_ID = /^[a-z0-9][a-z0-9._-]{0,127}$/;
+function isSafeId(id) {
+  return SAFE_ID.test(id);
+}
+function assertSafeId(id) {
+  if (!SAFE_ID.test(id)) {
+    throw new Error(`Invalid id "${id}"`);
+  }
+}
+async function getJson(path, userId, fallback) {
+  return spindle.userStorage.getJson(path, { fallback, userId });
+}
+async function setJson(path, value, userId, indent) {
+  await spindle.userStorage.setJson(path, value, indent === undefined ? { userId } : { userId, indent });
+}
+async function deletePath(path, userId) {
+  await spindle.userStorage.delete(path, userId);
+}
+async function listUnder(prefix, userId) {
+  try {
+    const files = await spindle.userStorage.list(prefix, userId);
+    return files.map((f) => f.replace(/\\/g, "/"));
+  } catch {
+    return [];
+  }
+}
 
 // src/hlog.ts
 var DEFAULT_MAX_ENTRIES = 2000;
@@ -3988,21 +3964,109 @@ function bufferStats(userId) {
   };
 }
 
-// src/pov-presets.ts
-var POV_PREFIX = "pov-presets/";
-function povPath(id) {
-  return `${POV_PREFIX}${id}.json`;
-}
-function slugifyId(input) {
+// src/resources/resource-service.ts
+function slugify(input, fallback) {
   const base = input.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  return base || "pov";
+  return base || fallback;
 }
-var SAFE_CUSTOM_ID = /^[a-z0-9][a-z0-9._-]{0,127}$/;
-function assertSafeCustomId(id) {
-  if (!SAFE_CUSTOM_ID.test(id)) {
-    throw new Error(`Invalid POV preset id "${id}"`);
+function createResourceService(cfg) {
+  const pathFor = (id) => `${cfg.prefix}${id}.json`;
+  const builtInIds = new Set(cfg.builtIns.map((b) => b.id));
+  async function listCustomIds(userId) {
+    const files = await listUnder(cfg.prefix, userId);
+    return files.filter((f) => /^[^/]+\.json$/.test(f)).map((f) => f.replace(/\.json$/, "")).filter(isSafeId);
   }
+  async function loadCustom(userId, id) {
+    if (!isSafeId(id))
+      return null;
+    const raw = await getJson(pathFor(id), userId, null);
+    if (!raw)
+      return null;
+    try {
+      return cfg.normalize(raw, id);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      debug(userId, `${cfg.kind}: normalize "${id}" failed: ${msg}`);
+      return null;
+    }
+  }
+  async function uniqueId(userId, base) {
+    const fallback = cfg.kind.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "item";
+    const slug = slugify(base, fallback);
+    const taken = new Set(builtInIds);
+    for (const id of await listCustomIds(userId))
+      taken.add(id);
+    if (!taken.has(slug))
+      return slug;
+    for (let i = 2;i < 1e4; i++) {
+      const candidate = `${slug}-${i}`;
+      if (!taken.has(candidate))
+        return candidate;
+    }
+    return `${slug}-${Date.now().toString(36)}`;
+  }
+  return {
+    async list(userId) {
+      const summaries = cfg.builtIns.map((b) => cfg.summarize(b, true));
+      const customs = [];
+      for (const id of await listCustomIds(userId)) {
+        const item = await loadCustom(userId, id);
+        if (item)
+          customs.push(cfg.summarize(item, false));
+      }
+      customs.sort((a, b) => a.name.localeCompare(b.name));
+      return [...customs, ...summaries];
+    },
+    async get(userId, id) {
+      const builtIn = cfg.builtIns.find((b) => b.id === id);
+      if (builtIn)
+        return builtIn;
+      return loadCustom(userId, id);
+    },
+    getBuiltIn(id) {
+      return cfg.builtIns.find((b) => b.id === id) ?? null;
+    },
+    isBuiltIn(id) {
+      return builtInIds.has(id);
+    },
+    async save(userId, item) {
+      if (builtInIds.has(item.id)) {
+        throw new Error(`Cannot overwrite built-in ${cfg.kind} "${item.id}"`);
+      }
+      assertSafeId(item.id);
+      cfg.validateSave?.(item);
+      await setJson(pathFor(item.id), item, userId);
+    },
+    async delete(userId, id) {
+      if (builtInIds.has(id)) {
+        throw new Error(`Cannot delete built-in ${cfg.kind} "${id}"`);
+      }
+      assertSafeId(id);
+      await deletePath(pathFor(id), userId);
+    },
+    async duplicate(userId, sourceId) {
+      const source = await this.get(userId, sourceId);
+      if (!source)
+        throw new Error(`${cfg.kind} "${sourceId}" not found`);
+      const newName = `${source.name} (Copy)`;
+      const newId = await uniqueId(userId, newName);
+      const copy = cfg.buildCopy(source, newId, newName);
+      await this.save(userId, copy);
+      return copy;
+    },
+    async exists(userId, id) {
+      if (builtInIds.has(id))
+        return true;
+      const item = await loadCustom(userId, id);
+      return item !== null;
+    },
+    nextId(userId, baseName) {
+      return uniqueId(userId, baseName);
+    }
+  };
 }
+
+// src/resources/pov-presets.ts
 var BUILTIN_POV_PRESETS = [
   {
     id: "auto",
@@ -4032,122 +4096,55 @@ var BUILTIN_POV_PRESETS = [
 ];
 var DEFAULT_POV_PRESET_ID = "auto";
 var DEFAULT_USER_POV_PRESET_ID = "1st";
-var BUILTIN_IDS = new Set(BUILTIN_POV_PRESETS.map((p) => p.id));
-function isBuiltInPovPresetId(id) {
-  return BUILTIN_IDS.has(id);
-}
-function getBuiltInPovPreset(id) {
-  return BUILTIN_POV_PRESETS.find((p) => p.id === id) ?? null;
-}
-async function listCustomIds(userId) {
-  try {
-    const files = await spindle.userStorage.list(POV_PREFIX, userId);
-    return files.map((f) => f.replace(/\\/g, "/")).filter((f) => /^[^/]+\.json$/.test(f)).map((f) => f.replace(/\.json$/, ""));
-  } catch {
-    return [];
-  }
-}
-async function uniqueId(userId, base) {
-  const slug = slugifyId(base);
-  const custom = new Set(await listCustomIds(userId));
-  const taken = (id) => custom.has(id) || BUILTIN_IDS.has(id);
-  if (!taken(slug))
-    return slug;
-  for (let i = 2;i < 1e4; i++) {
-    const candidate = `${slug}-${i}`;
-    if (!taken(candidate))
-      return candidate;
-  }
-  return `${slug}-${Date.now().toString(36)}`;
-}
-function isPovPresetShape(value) {
-  if (!value || typeof value !== "object")
-    return false;
-  const v = value;
-  return typeof v.id === "string" && typeof v.name === "string" && typeof v.content === "string";
-}
-async function loadCustom(userId, id) {
-  if (!SAFE_CUSTOM_ID.test(id))
-    return null;
-  try {
-    const raw = await spindle.userStorage.getJson(povPath(id), {
-      fallback: null,
-      userId
-    });
-    if (!isPovPresetShape(raw))
+var service = createResourceService({
+  kind: "POV preset",
+  prefix: "pov-presets/",
+  builtIns: BUILTIN_POV_PRESETS,
+  summarize: (item, builtIn) => ({
+    id: item.id,
+    name: item.name,
+    content: item.content,
+    builtIn
+  }),
+  normalize: (raw, id) => {
+    if (!raw || typeof raw !== "object")
       return null;
-    return { id, name: raw.name, content: raw.content };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    debug(userId, `loadCustomPov: failed to load "${id}": ${msg}`);
-    return null;
-  }
-}
-async function listPovPresets(userId) {
-  debug(userId, `listPovPresets: start`);
-  const ids = await listCustomIds(userId);
-  const customs = [];
-  for (const id of ids) {
-    const preset = await loadCustom(userId, id);
-    if (preset) {
-      customs.push({ id: preset.id, name: preset.name, content: preset.content, builtIn: false });
+    const v = raw;
+    if (typeof v.name !== "string" || typeof v.content !== "string")
+      return null;
+    return { id, name: v.name, content: v.content };
+  },
+  buildCopy: (source, newId, newName) => ({
+    id: newId,
+    name: newName,
+    content: source.content
+  }),
+  validateSave: (item) => {
+    if (typeof item.name !== "string" || typeof item.content !== "string") {
+      throw new Error("POV preset requires name and content strings");
     }
   }
-  customs.sort((a, b) => a.name.localeCompare(b.name));
-  const builtIns = BUILTIN_POV_PRESETS.map((p) => ({
-    id: p.id,
-    name: p.name,
-    content: p.content,
-    builtIn: true
-  }));
-  debug(userId, `listPovPresets: ${customs.length} custom + ${builtIns.length} built-in`);
-  return [...customs, ...builtIns];
+});
+function listPovPresets(userId) {
+  return service.list(userId);
 }
-async function getPovPreset(userId, id) {
-  const builtIn = getBuiltInPovPreset(id);
-  if (builtIn)
-    return builtIn;
-  return loadCustom(userId, id);
+function savePovPreset(userId, preset) {
+  return service.save(userId, { ...preset, name: preset.name.trim() || preset.id });
 }
-async function savePovPreset(userId, preset) {
-  if (isBuiltInPovPresetId(preset.id)) {
-    throw new Error(`Cannot overwrite built-in POV preset "${preset.id}"; duplicate it first.`);
-  }
-  assertSafeCustomId(preset.id);
-  const clean = {
-    id: preset.id,
-    name: preset.name.trim() || preset.id,
-    content: preset.content
-  };
-  debug(userId, `savePovPreset: id="${clean.id}" name="${clean.name}" contentLen=${clean.content.length}`);
-  await spindle.userStorage.setJson(povPath(clean.id), clean, { userId });
+function deletePovPreset(userId, id) {
+  return service.delete(userId, id);
 }
-async function deletePovPreset(userId, id) {
-  if (isBuiltInPovPresetId(id)) {
-    throw new Error(`Cannot delete built-in POV preset "${id}".`);
-  }
-  assertSafeCustomId(id);
-  debug(userId, `deletePovPreset: id="${id}"`);
-  await spindle.userStorage.delete(povPath(id), userId);
+function duplicatePovPreset(userId, sourceId) {
+  return service.duplicate(userId, sourceId);
 }
-async function duplicatePovPreset(userId, sourceId) {
-  const source = await getPovPreset(userId, sourceId);
-  if (!source) {
-    throw new Error(`POV preset "${sourceId}" not found`);
-  }
-  const newName = `${source.name} (Copy)`;
-  const newId = await uniqueId(userId, newName);
-  const copy = { id: newId, name: newName, content: source.content };
-  await savePovPreset(userId, copy);
-  debug(userId, `duplicatePovPreset: "${source.name}" (${sourceId}) -> "${newName}" (${newId})`);
-  return copy;
+function isBuiltInPovPresetId(id) {
+  return service.isBuiltIn(id);
 }
 async function resolvePovContent(userId, id) {
-  const preset = await getPovPreset(userId, id);
+  const preset = await service.get(userId, id);
   if (preset)
     return preset.content;
-  const fallback = getBuiltInPovPreset(DEFAULT_POV_PRESET_ID);
-  debug(userId, `resolvePovContent: id="${id}" not found; falling back to "${DEFAULT_POV_PRESET_ID}"`);
+  const fallback = service.getBuiltIn(DEFAULT_POV_PRESET_ID);
   return fallback?.content ?? "";
 }
 
@@ -4180,7 +4177,25 @@ var DEFAULT_SETTINGS = {
   debugLogFullPayloads: false
 };
 
-// src/settings.ts
+// src/mutation/queue.ts
+var queues = new Map;
+function enqueue(key, fn) {
+  const prev = queues.get(key) || Promise.resolve();
+  const next = prev.then(fn, fn).finally(() => {
+    if (queues.get(key) === next)
+      queues.delete(key);
+  });
+  queues.set(key, next);
+  return next;
+}
+function enqueueChatOperation(key, fn) {
+  return enqueue(`chat:${key}`, fn);
+}
+function enqueueUserOperation(userId, fn) {
+  return enqueue(`user:${userId}`, fn);
+}
+
+// src/storage/settings.ts
 var SETTINGS_FILE = "settings.json";
 var cacheByUser = new Map;
 function isPlainObject(v) {
@@ -4199,12 +4214,12 @@ function mergeSettingsWithDefaults(defaults, stored) {
   }
   return out;
 }
-function mergeStored(stored) {
-  return mergeSettingsWithDefaults(DEFAULT_SETTINGS, stored ?? {});
-}
 async function loadSettings(userId) {
-  const stored = await spindle.userStorage.getJson(SETTINGS_FILE, { fallback: {}, userId });
-  const merged = mergeStored(stored);
+  const stored = await spindle.userStorage.getJson(SETTINGS_FILE, {
+    fallback: {},
+    userId
+  });
+  const merged = mergeSettingsWithDefaults(DEFAULT_SETTINGS, stored ?? {});
   cacheByUser.set(userId, merged);
   setDebugEnabled(userId, merged.debugLogging, merged.debugLogMaxEntries, merged.debugLogFullPayloads);
   return merged;
@@ -4215,22 +4230,23 @@ async function getSettings(userId) {
     return cached;
   return loadSettings(userId);
 }
-async function saveSettings(userId, settings) {
-  await spindle.userStorage.setJson(SETTINGS_FILE, settings, {
-    indent: 2,
-    userId
-  });
+async function persist(userId, settings) {
+  await spindle.userStorage.setJson(SETTINGS_FILE, settings, { indent: 2, userId });
   cacheByUser.set(userId, settings);
+  setDebugEnabled(userId, settings.debugLogging, settings.debugLogMaxEntries, settings.debugLogFullPayloads);
 }
 async function updateSettings(userId, partial) {
-  const current = await getSettings(userId);
-  const updated = mergeSettingsWithDefaults(current, partial);
-  await saveSettings(userId, updated);
-  setDebugEnabled(userId, updated.debugLogging, updated.debugLogMaxEntries, updated.debugLogFullPayloads);
-  return updated;
+  let result = null;
+  await enqueueUserOperation(userId, async () => {
+    const current = await getSettings(userId);
+    const updated = mergeSettingsWithDefaults(current, partial);
+    await persist(userId, updated);
+    result = updated;
+  });
+  return result;
 }
 
-// src/text-utils.ts
+// src/text/shield.ts
 var PLACEHOLDER_AT_END = /<HONE-SHIELD-\d+\/>$/;
 var SHIELD_FRAGMENT = /<\/?HONE-SHIELD-\d+\/?>|HONE-SHIELD-\d+/;
 var MAX_SHIELD_PATTERN_LENGTH = 1e4;
@@ -4376,101 +4392,8 @@ function substituteShields(text, blocks) {
   }
   return result;
 }
-var COT_WRAPPERS = ["think", "thinking", "reasoning"];
-function removeCoTTags(text) {
-  const alternation = COT_WRAPPERS.join("|");
-  const closed = new RegExp(`\\s*<(${alternation})>[\\s\\S]*?<\\/\\1>\\s*`, "gi");
-  const unclosed = new RegExp(`\\s*<(${alternation})>[\\s\\S]*$`, "i");
-  return text.replace(closed, "").replace(unclosed, "").trim();
-}
-function parseTaggedBlock(raw, tag = "HONE-OUTPUT") {
-  const open = `<${tag}>`;
-  const close = `</${tag}>`;
-  const start = raw.indexOf(open);
-  if (start === -1)
-    return null;
-  const contentStart = start + open.length;
-  const end = raw.indexOf(close, contentStart);
-  if (end === -1) {
-    return { content: raw.slice(contentStart).trim(), unclosed: true };
-  }
-  return { content: raw.slice(contentStart, end).trim(), unclosed: false };
-}
-var NOTES_OPEN = "<HONE-NOTES>";
-var NOTES_CLOSE = "</HONE-NOTES>";
-var OUTPUT_OPEN = "<HONE-OUTPUT>";
-var OUTPUT_CLOSE = "</HONE-OUTPUT>";
-function extractRefinedContent(raw) {
-  if (raw.includes(OUTPUT_OPEN)) {
-    const parsed = parseTaggedBlock(raw);
-    if (!parsed) {
-      return {
-        ok: false,
-        reason: "no_tags",
-        message: "The LLM response was empty or unparseable even though <HONE-OUTPUT> was detected. Hone will not apply it."
-      };
-    }
-    const recoveries2 = [];
-    if (parsed.unclosed) {
-      recoveries2.push("<HONE-OUTPUT> opened but </HONE-OUTPUT> missing. Taking everything after <HONE-OUTPUT> as output (likely truncated or the model forgot the closing tag)");
-    }
-    if (!parsed.content) {
-      return {
-        ok: false,
-        reason: "notes_only",
-        message: "The LLM opened <HONE-OUTPUT> but wrote nothing inside it. Hone will not apply an empty refinement."
-      };
-    }
-    return { ok: true, content: parsed.content, recoveries: recoveries2 };
-  }
-  if (raw.includes(OUTPUT_CLOSE)) {
-    return {
-      ok: false,
-      reason: "malformed_partial",
-      message: "The LLM wrote </HONE-OUTPUT> without an opening <HONE-OUTPUT> tag, so Hone can't tell what the refined content was meant to be. Try again or switch to the non-Lite preset."
-    };
-  }
-  const recoveries = [];
-  let text = raw;
-  const hasNotesOpen = text.includes(NOTES_OPEN);
-  const hasNotesClose = text.includes(NOTES_CLOSE);
-  if (hasNotesClose && !hasNotesOpen) {
-    text = NOTES_OPEN + text;
-    recoveries.push("</HONE-NOTES> found without a matching <HONE-NOTES> opener. Prepended <HONE-NOTES> so the notes block can be stripped");
-  } else if (hasNotesOpen && !hasNotesClose) {
-    return {
-      ok: false,
-      reason: "malformed_partial",
-      message: "The LLM opened a <HONE-NOTES> block but never closed it, and didn't write <HONE-OUTPUT>. Hone can't tell where notes end and refined content begins. Try again or switch to the non-Lite preset."
-    };
-  }
-  const notesStart = text.indexOf(NOTES_OPEN);
-  const notesEnd = notesStart !== -1 ? text.indexOf(NOTES_CLOSE, notesStart + NOTES_OPEN.length) : -1;
-  if (notesStart !== -1 && notesEnd !== -1) {
-    text = (text.slice(0, notesStart) + text.slice(notesEnd + NOTES_CLOSE.length)).trim();
-    if (recoveries.length === 0) {
-      recoveries.push("stripped <HONE-NOTES>...</HONE-NOTES> block");
-    } else {
-      recoveries.push("stripped the recovered <HONE-NOTES>...</HONE-NOTES> block");
-    }
-    if (!text) {
-      return {
-        ok: false,
-        reason: "notes_only",
-        message: "The LLM only produced a <HONE-NOTES> changelog. There was no refined content after stripping it. Try again or switch to the non-Lite preset."
-      };
-    }
-    recoveries.push("no <HONE-OUTPUT> tag found; using the notes-stripped response as output");
-    return { ok: true, content: text, recoveries };
-  }
-  return {
-    ok: false,
-    reason: "no_tags",
-    message: "The LLM did not output any <HONE-NOTES> or <HONE-OUTPUT> tags at all. Hone can't be confident the response is a valid refinement. Try again or switch to the non-Lite preset."
-  };
-}
 
-// src/prompt-builder.ts
+// src/text/history.ts
 function buildChatHistoryBlock(messages, upToIndex, excludeId, tokenBudget) {
   if (tokenBudget <= 0)
     return "";
@@ -4510,301 +4433,20 @@ function approxTokens(text) {
   return Math.ceil(text.length / 4);
 }
 
-// src/generation.ts
-function safeStringify(value) {
-  try {
-    return JSON.stringify(value);
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    return `[unserializable: ${reason}]`;
-  }
-}
-function buildGenerationParameters(params) {
-  const result = {};
-  if (params.temperature !== null)
-    result.temperature = params.temperature;
-  if (params.maxTokens !== null)
-    result.max_tokens = params.maxTokens;
-  if (params.contextSize !== null)
-    result.max_context_length = params.contextSize;
-  if (params.topP !== null)
-    result.top_p = params.topP;
-  if (params.minP !== null)
-    result.min_p = params.minP;
-  if (params.topK !== null)
-    result.top_k = params.topK;
-  if (params.frequencyPenalty !== null)
-    result.frequency_penalty = params.frequencyPenalty;
-  if (params.presencePenalty !== null)
-    result.presence_penalty = params.presencePenalty;
-  if (params.repetitionPenalty !== null)
-    result.repetition_penalty = params.repetitionPenalty;
-  return Object.keys(result).length > 0 ? result : undefined;
-}
-async function resolveConnection(connectionProfileId, userId) {
-  try {
-    if (connectionProfileId) {
-      const conn2 = await spindle.connections.get(connectionProfileId, userId);
-      if (!conn2)
-        return null;
-      return { id: conn2.id, model: conn2.model || undefined };
-    }
-    const conns = await spindle.connections.list(userId);
-    if (!conns || conns.length === 0)
-      return null;
-    const conn = conns.find((c) => c.is_default) || conns[0];
-    return { id: conn.id, model: conn.model || undefined };
-  } catch (err) {
-    spindle.log.warn(`resolveConnection failed: ${err instanceof Error ? err.message : err}`);
-    return null;
-  }
-}
-async function generate(req, userId) {
-  try {
-    const timeoutMs = req.timeoutSeconds * 1000;
-    const resolved = await resolveConnection(req.connectionProfileId, userId);
-    if (!resolved) {
-      const reason = req.connectionProfileId ? `Connection profile "${req.connectionProfileId}" not found` : "No connection profiles configured. Set a default in Lumiverse Settings -> Connections";
-      spindle.log.warn(`Generation failed: ${reason}`);
-      return { content: "", success: false, error: reason };
-    }
-    const parameters = { ...req.parameters };
-    if (resolved.model)
-      parameters.model = resolved.model;
-    debug(userId, `Generation: connection=${resolved.id}${req.connectionProfileId ? "" : " (default)"}, model=${resolved.model || "none"}, msgs=${req.messages.length}, params=${JSON.stringify(parameters)}`);
-    if (isFullPayloadEnabled(userId)) {
-      debug(userId, `Generation request messages: ${safeStringify(req.messages)}`);
-    }
-    const result = await Promise.race([
-      spindle.generate.raw({
-        type: "raw",
-        messages: req.messages,
-        connection_id: resolved.id,
-        model: resolved.model,
-        parameters,
-        userId
-      }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("Generation timed out")), timeoutMs))
-    ]);
-    if (isFullPayloadEnabled(userId)) {
-      debug(userId, `Generation response: ${safeStringify(result)}`);
-    }
-    return { content: result.content ?? "", success: true };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    spindle.log.warn(`Generation failed: ${message}`);
-    return { content: "", success: false, error: message };
-  }
-}
-
-// src/presets.ts
-init_preset_defaults();
-var PRESETS_PREFIX = "presets/";
-function presetPath(id) {
-  return `${PRESETS_PREFIX}${id}.json`;
-}
-function slugifyId2(input) {
-  const base = input.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  return base || "preset";
-}
-async function uniqueId2(userId, base) {
-  const slug = slugifyId2(base);
-  const existing = new Set;
-  for (const bp of BUILTIN_PRESETS)
-    existing.add(bp.id);
-  const customIds = await listCustomIds2(userId);
-  for (const id of customIds)
-    existing.add(id);
-  if (!existing.has(slug))
-    return slug;
-  let i = 2;
-  while (existing.has(`${slug}-${i}`))
-    i++;
-  return `${slug}-${i}`;
-}
-async function listCustomIds2(userId) {
-  try {
-    const files = await spindle.userStorage.list(PRESETS_PREFIX, userId);
-    return files.map((f) => f.replace(/\\/g, "/")).filter((f) => /^[^/]+\.json$/.test(f)).map((f) => f.replace(/\.json$/, ""));
-  } catch {
-    return [];
-  }
-}
-async function listPresets(userId) {
-  debug(userId, `listPresets: start`);
-  const summaries = BUILTIN_PRESETS.map((p) => ({
-    id: p.id,
-    name: p.name,
-    builtIn: true,
-    strategy: p.strategy,
-    slot: p.slot
-  }));
-  const customIds = await listCustomIds2(userId);
-  debug(userId, `listPresets: ${BUILTIN_PRESETS.length} built-in, ${customIds.length} custom on disk`);
-  const customs = [];
-  for (const id of customIds) {
-    try {
-      const full = await spindle.userStorage.getJson(presetPath(id), { fallback: null, userId });
-      if (full && typeof full === "object" && !Array.isArray(full) && full.id && full.name && full.strategy && (full.slot === "input" || full.slot === "output")) {
-        customs.push({
-          id: full.id,
-          name: full.name,
-          builtIn: false,
-          strategy: full.strategy,
-          slot: full.slot
-        });
-      } else if (full) {
-        debug(userId, `listPresets: skipping "${id}": malformed preset shape`);
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      spindle.log.warn(`[Hone] failed to load preset summary for ${id}: ${message}`);
-      debug(userId, `listPresets: failed to load custom preset "${id}": ${message}`);
-    }
-  }
-  customs.sort((a, b) => a.name.localeCompare(b.name));
-  debug(userId, `listPresets: returning ${summaries.length + customs.length} total (${summaries.length} built-in + ${customs.length} custom)`);
-  return [...summaries, ...customs];
-}
-async function getPreset(userId, id) {
-  debug(userId, `getPreset: id="${id}"`);
-  const builtin = getBuiltInPreset(id);
-  if (builtin) {
-    debug(userId, `getPreset: resolved built-in "${builtin.name}" strategy=${builtin.strategy} prompts=${builtin.prompts.length}`);
-    return builtin;
-  }
-  try {
-    const custom = await spindle.userStorage.getJson(presetPath(id), { fallback: null, userId });
-    if (custom) {
-      const normalized = normalizePreset(custom);
-      debug(userId, `getPreset: loaded custom "${normalized.name}" strategy=${normalized.strategy} prompts=${normalized.prompts.length}`);
-      return normalized;
-    }
-    debug(userId, `getPreset: id="${id}" not found on disk`);
-    return null;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    spindle.log.warn(`[Hone] failed to load preset ${id}: ${message}`);
-    debug(userId, `getPreset: FAILED to load "${id}": ${message}`);
-    return null;
-  }
-}
-async function savePreset(userId, preset) {
-  debug(userId, `savePreset: id="${preset.id}" name="${preset.name}" strategy=${preset.strategy} prompts=${preset.prompts.length}`);
-  if (isBuiltInPresetId(preset.id)) {
-    debug(userId, `savePreset: REJECTED: "${preset.id}" is a built-in id`);
-    throw new Error(`Cannot save over built-in preset "${preset.id}"; duplicate it first.`);
-  }
-  const validated = normalizePreset({ ...preset, builtIn: false });
-  const clean = { ...validated, id: preset.id, builtIn: false };
-  await spindle.userStorage.setJson(presetPath(preset.id), clean, { userId });
-  debug(userId, `savePreset: written to disk at ${presetPath(preset.id)}`);
-}
-async function deletePreset(userId, id) {
-  debug(userId, `deletePreset: id="${id}"`);
-  if (isBuiltInPresetId(id)) {
-    debug(userId, `deletePreset: REJECTED: "${id}" is a built-in id`);
-    throw new Error(`Cannot delete built-in preset "${id}".`);
-  }
-  await spindle.userStorage.delete(presetPath(id), userId);
-  debug(userId, `deletePreset: deleted ${presetPath(id)}`);
-}
-async function duplicatePreset(userId, id) {
-  debug(userId, `duplicatePreset: source id="${id}"`);
-  const source = await getPreset(userId, id);
-  if (!source) {
-    debug(userId, `duplicatePreset: source "${id}" not found`);
-    throw new Error(`Preset "${id}" not found`);
-  }
-  const newName = `${source.name} (Copy)`;
-  const newId = await uniqueId2(userId, newName);
-  const copy = {
-    ...deepCloneJson(source),
-    id: newId,
-    name: newName,
-    builtIn: false,
-    slot: source.slot
-  };
-  await savePreset(userId, copy);
-  debug(userId, `duplicatePreset: created "${newName}" (id="${newId}") from "${source.name}"`);
-  return copy;
-}
-var EXPORT_FORMAT_VERSION = 1;
-async function exportPreset(userId, id) {
-  debug(userId, `exportPreset: id="${id}"`);
-  const preset = await getPreset(userId, id);
-  if (!preset) {
-    debug(userId, `exportPreset: "${id}" not found`);
-    throw new Error(`Preset "${id}" not found`);
-  }
-  const portable = stripStageModelProfiles(deepCloneJson(preset));
-  const blob = {
-    formatVersion: EXPORT_FORMAT_VERSION,
-    exportedAt: new Date().toISOString(),
-    preset: { ...portable, builtIn: false }
-  };
-  const json = JSON.stringify(blob, null, 2);
-  debug(userId, `exportPreset: exported "${preset.name}": ${json.length} chars`);
-  return { id: preset.id, name: preset.name, json };
-}
-function stripStageModelProfiles(preset) {
-  const pipelines = preset.strategy === "pipeline" ? preset.pipeline ? [preset.pipeline] : [] : preset.parallel ? [...preset.parallel.proposals, preset.parallel.aggregator] : [];
-  for (const pipe of pipelines) {
-    for (const stage of pipe.stages) {
-      if (stage.modelProfileId !== undefined)
-        delete stage.modelProfileId;
-    }
-  }
-  return preset;
-}
-async function importPreset(userId, json, targetSlot) {
-  debug(userId, `importPreset: parsing ${json.length} chars`);
-  let parsed;
-  try {
-    parsed = JSON.parse(json);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    debug(userId, `importPreset: JSON parse FAILED: ${message}`);
-    throw new Error(`Invalid JSON: ${message}`);
-  }
-  if (!parsed || typeof parsed !== "object") {
-    debug(userId, `importPreset: parsed value is not an object`);
-    throw new Error("Preset file is not a JSON object");
-  }
-  const blob = parsed;
-  if (blob.formatVersion !== EXPORT_FORMAT_VERSION) {
-    debug(userId, `importPreset: format version mismatch: got ${blob.formatVersion}, want ${EXPORT_FORMAT_VERSION}`);
-    throw new Error(`Unsupported preset format version: ${blob.formatVersion} (expected ${EXPORT_FORMAT_VERSION})`);
-  }
-  if (!blob.preset) {
-    debug(userId, `importPreset: missing preset field in blob`);
-    throw new Error("Export blob is missing `preset` field");
-  }
-  debug(userId, `importPreset: validating preset name="${blob.preset.name || "?"}" strategy="${blob.preset.strategy || "?"}"`);
-  const withSlot = { ...blob.preset, slot: targetSlot };
-  const validated = normalizePreset(withSlot);
-  const newId = await uniqueId2(userId, validated.name || validated.id);
-  const toSave = stripStageModelProfiles({ ...validated, id: newId, builtIn: false, slot: targetSlot });
-  await savePreset(userId, toSave);
-  debug(userId, `importPreset: saved as "${toSave.name}" (id="${newId}") slot=${targetSlot}`);
-  return toSave;
-}
+// src/resources/presets.ts
 function requireString(v, path) {
-  if (typeof v !== "string") {
+  if (typeof v !== "string")
     throw new Error(`Invalid preset: expected string at ${path}`);
-  }
   return v;
 }
 function requireArray(v, path) {
-  if (!Array.isArray(v)) {
+  if (!Array.isArray(v))
     throw new Error(`Invalid preset: expected array at ${path}`);
-  }
   return v;
 }
 function normalizePrompt(raw, path) {
-  if (!raw || typeof raw !== "object") {
+  if (!raw || typeof raw !== "object")
     throw new Error(`Invalid preset: expected object at ${path}`);
-  }
   const p = raw;
   return {
     id: requireString(p.id, `${path}.id`),
@@ -4813,9 +4455,8 @@ function normalizePrompt(raw, path) {
   };
 }
 function normalizeRow(raw, path) {
-  if (!raw || typeof raw !== "object") {
+  if (!raw || typeof raw !== "object")
     throw new Error(`Invalid preset: expected object at ${path}`);
-  }
   const r = raw;
   const role = requireString(r.role, `${path}.role`);
   if (role !== "system" && role !== "user" && role !== "assistant") {
@@ -4825,9 +4466,8 @@ function normalizeRow(raw, path) {
   return { role, promptIds };
 }
 function normalizeStage(raw, path) {
-  if (!raw || typeof raw !== "object") {
+  if (!raw || typeof raw !== "object")
     throw new Error(`Invalid preset: expected object at ${path}`);
-  }
   const s = raw;
   return {
     id: requireString(s.id, `${path}.id`),
@@ -4837,9 +4477,8 @@ function normalizeStage(raw, path) {
   };
 }
 function normalizePipeline(raw, path) {
-  if (!raw || typeof raw !== "object") {
+  if (!raw || typeof raw !== "object")
     throw new Error(`Invalid preset: expected object at ${path}`);
-  }
   const p = raw;
   return {
     stages: requireArray(p.stages, `${path}.stages`).map((s, i) => normalizeStage(s, `${path}.stages[${i}]`))
@@ -4848,32 +4487,25 @@ function normalizePipeline(raw, path) {
 function normalizeShieldConfig(raw) {
   if (raw === undefined || raw === null)
     return;
-  if (typeof raw !== "object") {
+  if (typeof raw !== "object")
     throw new Error(`Invalid preset: "shieldConfig" must be an object`);
-  }
   const c = raw;
   const asStrings = (v, path) => {
     if (v === undefined)
       return [];
-    if (!Array.isArray(v)) {
+    if (!Array.isArray(v))
       throw new Error(`Invalid preset: "shieldConfig.${path}" must be an array of strings`);
-    }
     return v.map((s, i) => {
-      if (typeof s !== "string") {
+      if (typeof s !== "string")
         throw new Error(`Invalid preset: "shieldConfig.${path}[${i}]" must be a string`);
-      }
       return s;
     });
   };
-  return {
-    include: asStrings(c.include, "include"),
-    exclude: asStrings(c.exclude, "exclude")
-  };
+  return { include: asStrings(c.include, "include"), exclude: asStrings(c.exclude, "exclude") };
 }
 function normalizeParallel(raw, path) {
-  if (!raw || typeof raw !== "object") {
+  if (!raw || typeof raw !== "object")
     throw new Error(`Invalid preset: expected object at ${path}`);
-  }
   const c = raw;
   return {
     proposals: requireArray(c.proposals, `${path}.proposals`).map((p, i) => normalizePipeline(p, `${path}.proposals[${i}]`)),
@@ -4881,9 +4513,8 @@ function normalizeParallel(raw, path) {
   };
 }
 function normalizePreset(raw) {
-  if (!raw || typeof raw !== "object") {
+  if (!raw || typeof raw !== "object")
     throw new Error("Invalid preset: not an object");
-  }
   const p = raw;
   const strategy = requireString(p.strategy, "strategy");
   if (strategy !== "pipeline" && strategy !== "parallel") {
@@ -4895,9 +4526,8 @@ function normalizePreset(raw) {
   const prompts = requireArray(p.prompts, "prompts").map((pr, i) => normalizePrompt(pr, `prompts[${i}]`));
   const seenPromptIds = new Set;
   for (const pr of prompts) {
-    if (seenPromptIds.has(pr.id)) {
+    if (seenPromptIds.has(pr.id))
       throw new Error(`Invalid preset: duplicate prompt id "${pr.id}" in prompts`);
-    }
     seenPromptIds.add(pr.id);
   }
   const headCollection = requireArray(p.headCollection, "headCollection").map((id, i) => requireString(id, `headCollection[${i}]`));
@@ -4925,14 +4555,12 @@ function normalizePreset(raw) {
     ...shieldConfig ? { shieldConfig } : {}
   };
   if (strategy === "pipeline") {
-    if (!p.pipeline) {
+    if (!p.pipeline)
       throw new Error("Invalid preset: `pipeline` required when strategy is 'pipeline'");
-    }
     preset.pipeline = normalizePipeline(p.pipeline, "pipeline");
   } else {
-    if (!p.parallel) {
+    if (!p.parallel)
       throw new Error("Invalid preset: `parallel` required when strategy is 'parallel'");
-    }
     preset.parallel = normalizeParallel(p.parallel, "parallel");
   }
   const pipelines = strategy === "pipeline" ? [preset.pipeline] : [...preset.parallel.proposals, preset.parallel.aggregator];
@@ -4954,152 +4582,266 @@ function normalizePreset(raw) {
 function deepCloneJson(value) {
   return JSON.parse(JSON.stringify(value));
 }
-
-// src/model-profiles.ts
-var PROFILES_PREFIX = "model-profiles/";
-function profilePath(id) {
-  return `${PROFILES_PREFIX}${id}.json`;
-}
-function slugifyId3(input) {
-  const base = input.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  return base || "profile";
-}
-async function listCustomIds3(userId) {
-  try {
-    const keys = await spindle.userStorage.list(PROFILES_PREFIX, userId);
-    return keys.filter((k) => k.endsWith(".json")).map((k) => k.replace(PROFILES_PREFIX, "").replace(/\.json$/, ""));
-  } catch {
-    return [];
-  }
-}
-async function uniqueId3(userId, base) {
-  const slug = slugifyId3(base);
-  const existing = new Set(await listCustomIds3(userId));
-  if (!existing.has(slug))
-    return slug;
-  for (let i = 2;i < 1000; i++) {
-    const candidate = `${slug}-${i}`;
-    if (!existing.has(candidate))
-      return candidate;
-  }
-  return `${slug}-${Date.now().toString(36)}`;
-}
-var DEFAULT_SAMPLERS = {
-  temperature: null,
-  maxTokens: null,
-  contextSize: null,
-  topP: null,
-  minP: null,
-  topK: null,
-  frequencyPenalty: null,
-  presencePenalty: null,
-  repetitionPenalty: null
-};
-var DEFAULT_REASONING = {
-  stripCoTTags: true,
-  requestReasoning: false,
-  reasoningEffort: "auto"
-};
-function createDefaultProfile(connectionProfileId, name) {
-  return {
-    name,
-    connectionProfileId,
-    samplers: { ...DEFAULT_SAMPLERS },
-    reasoning: { ...DEFAULT_REASONING }
-  };
-}
-async function listModelProfiles(userId) {
-  debug(userId, `listModelProfiles: start`);
-  const ids = await listCustomIds3(userId);
-  const summaries = [];
-  for (const id of ids) {
-    try {
-      const profile = await spindle.userStorage.getJson(profilePath(id), { fallback: null, userId });
-      if (profile && profile.id && profile.name && profile.connectionProfileId) {
-        summaries.push({
-          id: profile.id,
-          name: profile.name,
-          connectionProfileId: profile.connectionProfileId
-        });
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      debug(userId, `listModelProfiles: failed to load "${id}": ${message}`);
+function stripStageModelProfiles(preset) {
+  const pipelines = preset.strategy === "pipeline" ? preset.pipeline ? [preset.pipeline] : [] : preset.parallel ? [...preset.parallel.proposals, preset.parallel.aggregator] : [];
+  for (const pipe of pipelines) {
+    for (const stage of pipe.stages) {
+      if (stage.modelProfileId !== undefined)
+        delete stage.modelProfileId;
     }
   }
-  summaries.sort((a, b) => a.name.localeCompare(b.name));
-  debug(userId, `listModelProfiles: returning ${summaries.length} profiles`);
-  return summaries;
+  return preset;
 }
-async function getModelProfile(userId, id) {
-  debug(userId, `getModelProfile: id="${id}"`);
-  try {
-    const profile = await spindle.userStorage.getJson(profilePath(id), { fallback: null, userId });
-    if (!profile || !profile.id) {
-      debug(userId, `getModelProfile: "${id}" not found or invalid`);
+var service2 = createResourceService({
+  kind: "preset",
+  prefix: "presets/",
+  builtIns: BUILTIN_PRESETS,
+  summarize: (item, builtIn) => ({
+    id: item.id,
+    name: item.name,
+    builtIn,
+    strategy: item.strategy,
+    slot: item.slot
+  }),
+  normalize: (raw, id) => {
+    if (!raw || typeof raw !== "object")
       return null;
-    }
-    debug(userId, `getModelProfile: loaded "${profile.name}" connection=${profile.connectionProfileId}`);
-    return profile;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    debug(userId, `getModelProfile: FAILED for "${id}": ${message}`);
-    return null;
-  }
-}
-async function saveModelProfile(userId, profile) {
-  debug(userId, `saveModelProfile: id="${profile.id}" name="${profile.name}"`);
-  await spindle.userStorage.setJson(profilePath(profile.id), profile, { userId });
-  debug(userId, `saveModelProfile: saved "${profile.name}"`);
-}
-async function deleteModelProfile(userId, id) {
-  debug(userId, `deleteModelProfile: id="${id}"`);
-  try {
-    await spindle.userStorage.delete(profilePath(id), userId);
-    debug(userId, `deleteModelProfile: deleted "${id}"`);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    debug(userId, `deleteModelProfile: FAILED for "${id}": ${message}`);
-    throw err;
-  }
-}
-async function createModelProfile(userId, connectionProfileId, name) {
-  const id = await uniqueId3(userId, name);
-  const profile = {
-    id,
-    ...createDefaultProfile(connectionProfileId, name)
-  };
-  await saveModelProfile(userId, profile);
-  debug(userId, `createModelProfile: created "${name}" (id="${id}") connection=${connectionProfileId}`);
-  return profile;
-}
-async function duplicateModelProfile(userId, sourceId) {
-  const source = await getModelProfile(userId, sourceId);
-  if (!source) {
-    debug(userId, `duplicateModelProfile: source "${sourceId}" not found`);
-    return null;
-  }
-  const newName = `${source.name} (Copy)`;
-  const newId = await uniqueId3(userId, newName);
-  const duplicate = {
+    const candidate = { ...raw, id };
+    return normalizePreset(candidate);
+  },
+  buildCopy: (source, newId, newName) => ({
+    ...deepCloneJson(source),
     id: newId,
     name: newName,
-    connectionProfileId: source.connectionProfileId,
-    samplers: { ...source.samplers },
-    reasoning: { ...source.reasoning }
-  };
-  await saveModelProfile(userId, duplicate);
-  debug(userId, `duplicateModelProfile: "${source.name}" -> "${newName}" (id="${newId}")`);
-  return duplicate;
+    builtIn: false
+  }),
+  validateSave: (item) => {
+    normalizePreset({ ...item, builtIn: false });
+  }
+});
+function listPresets(userId) {
+  return service2.list(userId);
 }
-function getDefaultProfile() {
-  return {
-    id: DEFAULT_PROFILE_ID,
-    name: "Default",
-    connectionProfileId: "",
-    samplers: { ...DEFAULT_SAMPLERS },
-    reasoning: { ...DEFAULT_REASONING }
+function getPreset(userId, id) {
+  return service2.get(userId, id);
+}
+async function savePreset(userId, preset) {
+  await service2.save(userId, { ...preset, builtIn: false });
+}
+function deletePreset(userId, id) {
+  return service2.delete(userId, id);
+}
+function duplicatePreset(userId, id) {
+  return service2.duplicate(userId, id);
+}
+var EXPORT_FORMAT_VERSION = 1;
+async function exportPreset(userId, id) {
+  const preset = await service2.get(userId, id);
+  if (!preset)
+    throw new Error(`Preset "${id}" not found`);
+  const portable = stripStageModelProfiles(deepCloneJson(preset));
+  const blob = {
+    formatVersion: EXPORT_FORMAT_VERSION,
+    exportedAt: new Date().toISOString(),
+    preset: { ...portable, builtIn: false }
   };
+  return { id: preset.id, name: preset.name, json: JSON.stringify(blob, null, 2) };
+}
+async function importPreset(userId, json, targetSlot) {
+  let parsed;
+  try {
+    parsed = JSON.parse(json);
+  } catch (err) {
+    throw new Error(`Invalid JSON: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (!parsed || typeof parsed !== "object")
+    throw new Error("Preset file is not a JSON object");
+  const blob = parsed;
+  if (blob.formatVersion !== EXPORT_FORMAT_VERSION) {
+    throw new Error(`Unsupported preset format version: ${blob.formatVersion} (expected ${EXPORT_FORMAT_VERSION})`);
+  }
+  if (!blob.preset)
+    throw new Error("Export blob is missing `preset` field");
+  const withSlot = { ...blob.preset, slot: targetSlot };
+  const validated = normalizePreset(withSlot);
+  const newId = await service2.nextId(userId, validated.name || validated.id);
+  const toSave = stripStageModelProfiles({ ...validated, id: newId, builtIn: false, slot: targetSlot });
+  await service2.save(userId, toSave);
+  return toSave;
+}
+
+// src/storage/undo.ts
+var UNDO_PREFIX = "undo/";
+var INDEX_FILENAME = "_index.json";
+var MAX_UNDO_PER_CHAT = 200;
+function messageFilePath(chatId, messageId) {
+  return `${UNDO_PREFIX}${chatId}/${messageId}.json`;
+}
+function indexPath(chatId) {
+  return `${UNDO_PREFIX}${chatId}/${INDEX_FILENAME}`;
+}
+function chatUndoDir(chatId) {
+  return `${UNDO_PREFIX}${chatId}/`;
+}
+async function loadMessageFile(userId, chatId, messageId) {
+  return spindle.userStorage.getJson(messageFilePath(chatId, messageId), {
+    fallback: null,
+    userId
+  });
+}
+async function saveMessageFile(userId, chatId, messageId, file) {
+  await spindle.userStorage.setJson(messageFilePath(chatId, messageId), file, { userId });
+}
+async function rebuildQueue(userId, chatId) {
+  const rels = await spindle.userStorage.list(chatUndoDir(chatId), userId);
+  const withTs = [];
+  for (const rel of rels) {
+    const name = rel.replace(/\\/g, "/");
+    if (name === INDEX_FILENAME)
+      continue;
+    if (name.includes("/"))
+      continue;
+    if (!name.endsWith(".json"))
+      continue;
+    const messageId = name.slice(0, -".json".length);
+    const file = await loadMessageFile(userId, chatId, messageId);
+    if (!file)
+      continue;
+    for (const [swipeIdStr, entry] of Object.entries(file)) {
+      const swipeId = parseInt(swipeIdStr, 10);
+      if (!Number.isFinite(swipeId))
+        continue;
+      withTs.push({ m: messageId, s: swipeId, t: entry.timestamp });
+    }
+  }
+  withTs.sort((a, b) => a.t - b.t);
+  return withTs.map(({ m, s }) => ({ m, s }));
+}
+async function loadIndex(userId, chatId) {
+  const existing = await spindle.userStorage.getJson(indexPath(chatId), {
+    fallback: null,
+    userId
+  });
+  if (existing && Array.isArray(existing.queue))
+    return existing;
+  const queue = await rebuildQueue(userId, chatId);
+  if (queue.length > 0) {
+    debug(userId, `loadIndex: rebuilt queue for ${chatId.slice(0, 8)} with ${queue.length} entries`);
+  }
+  return { queue };
+}
+async function saveIndex(userId, chatId, index) {
+  await spindle.userStorage.setJson(indexPath(chatId), index, { userId });
+}
+async function removeSwipeSlot(userId, chatId, messageId, swipeId) {
+  const file = await loadMessageFile(userId, chatId, messageId);
+  if (!file)
+    return;
+  delete file[String(swipeId)];
+  if (Object.keys(file).length === 0) {
+    await spindle.userStorage.delete(messageFilePath(chatId, messageId), userId);
+  } else {
+    await saveMessageFile(userId, chatId, messageId, file);
+  }
+}
+async function saveUndo(userId, chatId, messageId, swipeId, entry) {
+  debug(userId, `saveUndo: ${messageId.slice(0, 8)}/${swipeId} origLen=${entry.originalContent.length} refLen=${entry.refinedContent.length} strategy=${entry.strategy} stages=${entry.stages?.length ?? 0}`);
+  const file = await loadMessageFile(userId, chatId, messageId) ?? {};
+  file[String(swipeId)] = { ...entry, swipeId };
+  await saveMessageFile(userId, chatId, messageId, file);
+  const index = await loadIndex(userId, chatId);
+  index.queue = index.queue.filter((q) => !(q.m === messageId && q.s === swipeId));
+  index.queue.push({ m: messageId, s: swipeId });
+  while (index.queue.length > MAX_UNDO_PER_CHAT) {
+    const evicted = index.queue.shift();
+    try {
+      await removeSwipeSlot(userId, chatId, evicted.m, evicted.s);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      spindle.log.warn(`[Hone] saveUndo: failed to evict ${evicted.m.slice(0, 8)}/${evicted.s} during prune: ${message}; continuing`);
+    }
+  }
+  await saveIndex(userId, chatId, index);
+}
+async function getUndo(userId, chatId, messageId, swipeId) {
+  const file = await loadMessageFile(userId, chatId, messageId);
+  if (!file)
+    return null;
+  const entry = file[String(swipeId)];
+  if (!entry)
+    return null;
+  debug(userId, `getUndo: hit ${messageId.slice(0, 8)}/${swipeId} strategy=${entry.strategy}`);
+  return entry;
+}
+async function deleteUndo(userId, chatId, messageId, swipeId) {
+  debug(userId, `deleteUndo: ${messageId.slice(0, 8)}/${swipeId}`);
+  await removeSwipeSlot(userId, chatId, messageId, swipeId);
+  const index = await loadIndex(userId, chatId);
+  index.queue = index.queue.filter((q) => !(q.m === messageId && q.s === swipeId));
+  await saveIndex(userId, chatId, index);
+}
+async function listUndoEntriesForMessage(userId, chatId, messageId) {
+  const file = await loadMessageFile(userId, chatId, messageId);
+  if (!file)
+    return [];
+  const out = [];
+  for (const [swipeIdStr, entry] of Object.entries(file)) {
+    const swipeId = parseInt(swipeIdStr, 10);
+    if (!Number.isFinite(swipeId))
+      continue;
+    out.push({ swipeId, entry });
+  }
+  return out;
+}
+async function replaceUndoFileForMessage(userId, chatId, messageId, next) {
+  if (next.length === 0) {
+    await spindle.userStorage.delete(messageFilePath(chatId, messageId), userId);
+  } else {
+    const file = {};
+    for (const { swipeId, entry } of next)
+      file[String(swipeId)] = { ...entry, swipeId };
+    await saveMessageFile(userId, chatId, messageId, file);
+  }
+  const index = await loadIndex(userId, chatId);
+  const keepSwipeIds = new Set(next.map((n) => n.swipeId));
+  index.queue = index.queue.filter((q) => q.m !== messageId || keepSwipeIds.has(q.s));
+  const existingSwipeIds = new Set(index.queue.filter((q) => q.m === messageId).map((q) => q.s));
+  for (const { swipeId } of next) {
+    if (!existingSwipeIds.has(swipeId))
+      index.queue.push({ m: messageId, s: swipeId });
+  }
+  await saveIndex(userId, chatId, index);
+}
+async function listRefinedKeysInChat(userId, chatId) {
+  const index = await loadIndex(userId, chatId);
+  const out = new Set;
+  for (const q of index.queue)
+    out.add(`${q.m}:${q.s}`);
+  return out;
+}
+
+// src/storage/stats.ts
+var STATS_PREFIX = "stats/";
+function statsFile(chatId) {
+  return `${STATS_PREFIX}${chatId}.json`;
+}
+var DEFAULT_STATS = {
+  messagesRefined: 0,
+  totalRefinements: 0,
+  byStrategy: {}
+};
+async function getStats(userId, chatId) {
+  return spindle.userStorage.getJson(statsFile(chatId), {
+    fallback: { ...DEFAULT_STATS },
+    userId
+  });
+}
+async function incrementStats(userId, chatId, strategy, count = 1) {
+  const stats = await getStats(userId, chatId);
+  stats.messagesRefined += count;
+  stats.totalRefinements += count;
+  stats.byStrategy[strategy] = (stats.byStrategy[strategy] || 0) + count;
+  await spindle.userStorage.setJson(statsFile(chatId), stats, { userId });
 }
 
 // src/assemble.ts
@@ -5246,290 +4988,202 @@ async function assembleStage(stage, prompts, headCollection, ctx) {
   return { messages, diagnostics, merges };
 }
 
-// src/history.ts
-var UNDO_PREFIX = "undo/";
-var STATS_PREFIX = "stats/";
-var INDEX_FILENAME = "_index.json";
-var MAX_UNDO_PER_CHAT = 200;
-function messageFilePath(chatId, messageId) {
-  return `${UNDO_PREFIX}${chatId}/${messageId}.json`;
-}
-function indexPath(chatId) {
-  return `${UNDO_PREFIX}${chatId}/${INDEX_FILENAME}`;
-}
-function chatUndoDir(chatId) {
-  return `${UNDO_PREFIX}${chatId}/`;
-}
-async function loadMessageFile(userId, chatId, messageId) {
-  return spindle.userStorage.getJson(messageFilePath(chatId, messageId), { fallback: null, userId });
-}
-async function saveMessageFile(userId, chatId, messageId, file) {
-  await spindle.userStorage.setJson(messageFilePath(chatId, messageId), file, { userId });
-}
-async function rebuildQueue(userId, chatId) {
-  const rels = await spindle.userStorage.list(chatUndoDir(chatId), userId);
-  const withTs = [];
-  for (const rel of rels) {
-    const name = rel.replace(/\\/g, "/");
-    if (name === INDEX_FILENAME)
-      continue;
-    if (name.includes("/"))
-      continue;
-    if (!name.endsWith(".json"))
-      continue;
-    const messageId = name.slice(0, -".json".length);
-    const file = await loadMessageFile(userId, chatId, messageId);
-    if (!file)
-      continue;
-    for (const [swipeIdStr, entry] of Object.entries(file)) {
-      const swipeId = parseInt(swipeIdStr, 10);
-      if (!Number.isFinite(swipeId))
-        continue;
-      withTs.push({ m: messageId, s: swipeId, t: entry.timestamp });
-    }
-  }
-  withTs.sort((a, b) => a.t - b.t);
-  return withTs.map(({ m, s }) => ({ m, s }));
-}
-async function loadIndex(userId, chatId) {
-  const existing = await spindle.userStorage.getJson(indexPath(chatId), { fallback: null, userId });
-  if (existing && Array.isArray(existing.queue))
-    return existing;
-  const queue = await rebuildQueue(userId, chatId);
-  if (queue.length > 0) {
-    debug(userId, `loadIndex: rebuilt queue for ${chatId.slice(0, 8)} with ${queue.length} entries`);
-  }
-  return { queue };
-}
-async function saveIndex(userId, chatId, index) {
-  await spindle.userStorage.setJson(indexPath(chatId), index, { userId });
-}
-async function removeSwipeSlot(userId, chatId, messageId, swipeId) {
-  const file = await loadMessageFile(userId, chatId, messageId);
-  if (!file)
-    return;
-  delete file[String(swipeId)];
-  if (Object.keys(file).length === 0) {
-    await spindle.userStorage.delete(messageFilePath(chatId, messageId), userId);
-  } else {
-    await saveMessageFile(userId, chatId, messageId, file);
-  }
-}
-async function saveUndo(userId, chatId, messageId, swipeId, entry) {
-  debug(userId, `saveUndo: ${messageId.slice(0, 8)}/${swipeId} origLen=${entry.originalContent.length} refLen=${entry.refinedContent.length} strategy=${entry.strategy} stages=${entry.stages?.length ?? 0}`);
-  const file = await loadMessageFile(userId, chatId, messageId) ?? {};
-  file[String(swipeId)] = { ...entry, swipeId };
-  await saveMessageFile(userId, chatId, messageId, file);
-  const index = await loadIndex(userId, chatId);
-  index.queue = index.queue.filter((q) => !(q.m === messageId && q.s === swipeId));
-  index.queue.push({ m: messageId, s: swipeId });
-  while (index.queue.length > MAX_UNDO_PER_CHAT) {
-    const evicted = index.queue.shift();
-    try {
-      await removeSwipeSlot(userId, chatId, evicted.m, evicted.s);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      spindle.log.warn(`[Hone] saveUndo: failed to evict ${evicted.m.slice(0, 8)}/${evicted.s} during prune: ${message}; continuing`);
-    }
-  }
-  await saveIndex(userId, chatId, index);
-}
-async function getUndo(userId, chatId, messageId, swipeId) {
-  const file = await loadMessageFile(userId, chatId, messageId);
-  if (!file)
-    return null;
-  const entry = file[String(swipeId)];
-  if (!entry)
-    return null;
-  debug(userId, `getUndo: hit ${messageId.slice(0, 8)}/${swipeId} strategy=${entry.strategy}`);
-  return entry;
-}
-async function deleteUndo(userId, chatId, messageId, swipeId) {
-  debug(userId, `deleteUndo: ${messageId.slice(0, 8)}/${swipeId}`);
-  await removeSwipeSlot(userId, chatId, messageId, swipeId);
-  const index = await loadIndex(userId, chatId);
-  index.queue = index.queue.filter((q) => !(q.m === messageId && q.s === swipeId));
-  await saveIndex(userId, chatId, index);
-}
-async function listUndoEntriesForMessage(userId, chatId, messageId) {
-  const file = await loadMessageFile(userId, chatId, messageId);
-  if (!file)
-    return [];
-  const out = [];
-  for (const [swipeIdStr, entry] of Object.entries(file)) {
-    const swipeId = parseInt(swipeIdStr, 10);
-    if (!Number.isFinite(swipeId))
-      continue;
-    out.push({ swipeId, entry });
-  }
-  return out;
-}
-async function replaceUndoFileForMessage(userId, chatId, messageId, next) {
-  if (next.length === 0) {
-    await spindle.userStorage.delete(messageFilePath(chatId, messageId), userId);
-  } else {
-    const file = {};
-    for (const { swipeId, entry } of next) {
-      file[String(swipeId)] = { ...entry, swipeId };
-    }
-    await saveMessageFile(userId, chatId, messageId, file);
-  }
-  const index = await loadIndex(userId, chatId);
-  const keepSwipeIds = new Set(next.map((n) => n.swipeId));
-  index.queue = index.queue.filter((q) => q.m !== messageId || keepSwipeIds.has(q.s));
-  const existingSwipeIds = new Set(index.queue.filter((q) => q.m === messageId).map((q) => q.s));
-  for (const { swipeId } of next) {
-    if (!existingSwipeIds.has(swipeId)) {
-      index.queue.push({ m: messageId, s: swipeId });
-    }
-  }
-  await saveIndex(userId, chatId, index);
-}
-async function listRefinedKeysInChat(userId, chatId) {
-  const index = await loadIndex(userId, chatId);
-  const out = new Set;
-  for (const q of index.queue)
-    out.add(`${q.m}:${q.s}`);
-  return out;
-}
-function statsFile(chatId) {
-  return `${STATS_PREFIX}${chatId}.json`;
-}
-var DEFAULT_STATS = {
-  messagesRefined: 0,
-  totalRefinements: 0,
-  byStrategy: {}
+// src/resources/model-profiles.ts
+var DEFAULT_SAMPLERS = {
+  temperature: null,
+  maxTokens: null,
+  contextSize: null,
+  topP: null,
+  minP: null,
+  topK: null,
+  frequencyPenalty: null,
+  presencePenalty: null,
+  repetitionPenalty: null
 };
-async function getStats(userId, chatId) {
-  return spindle.userStorage.getJson(statsFile(chatId), {
-    fallback: { ...DEFAULT_STATS },
-    userId
-  });
-}
-async function incrementStats(userId, chatId, strategy, count = 1) {
-  const stats = await getStats(userId, chatId);
-  stats.messagesRefined += count;
-  stats.totalRefinements += count;
-  stats.byStrategy[strategy] = (stats.byStrategy[strategy] || 0) + count;
-  await spindle.userStorage.setJson(statsFile(chatId), stats, { userId });
-}
-
-// src/chat-queue.ts
-var chatQueues = new Map;
-function enqueueChatOperation(chatId, fn) {
-  const prev = chatQueues.get(chatId) || Promise.resolve();
-  const next = prev.then(fn, fn).finally(() => {
-    if (chatQueues.get(chatId) === next) {
-      chatQueues.delete(chatId);
-    }
-  });
-  chatQueues.set(chatId, next);
-  return next;
-}
-
-// src/lore.ts
-async function fetchLoreContents(entryIds, getEntry) {
-  const results = await Promise.allSettled(entryIds.map((id) => getEntry(id)));
-  const contents = [];
-  for (const r of results) {
-    if (r.status === "fulfilled" && r.value && r.value.content) {
-      contents.push(r.value.content);
-    }
-  }
-  return contents;
-}
-function assembleLoreBlock(contents, maxTokens) {
-  if (contents.length === 0)
-    return "";
-  const block = contents.join(`
-
-`);
-  if (maxTokens <= 0)
-    return block;
-  const charCap = maxTokens * 4;
-  return block.length > charCap ? block.slice(0, charCap) : block;
-}
-
-// src/refinement.ts
-var DEFAULT_MESSAGE_CONTEXT_TOKENS = 4000;
-async function getMessages(chatId) {
-  return spindle.chat.getMessages(chatId);
-}
-async function updateMessage(chatId, messageId, patch) {
-  return spindle.chat.updateMessage(chatId, messageId, patch);
-}
-async function getChat(chatId, userId) {
-  return spindle.chats.get(chatId, userId);
-}
-function findLastAssistantMessage(messages, fromIndex) {
-  for (let i = Math.min(fromIndex, messages.length - 1);i >= 0; i--) {
-    if (messages[i].role === "assistant") {
-      return { message: messages[i], index: i };
-    }
-  }
-  return null;
-}
-function buildShieldPreservationNote(blocks) {
-  if (blocks.length === 0)
-    return "";
-  const tokens = blocks.map((b) => b.placeholder).join(", ");
-  return `IMPORTANT: opaque placeholder tokens: ${tokens}. ` + "Include each of these tokens through to your output EXACTLY as-is. " + "Do not edit, translate, reformat, split across lines, quote, or remove them. " + "They stand in for scaffolding that must round-trip unchanged.";
-}
-async function fetchLoreBlock(chatId, userId, maxLorebookTokens) {
-  try {
-    const activated = await spindle.world_books.getActivated(chatId, userId);
-    if (!activated || activated.length === 0) {
-      return { block: "", activated: 0, fetched: 0 };
-    }
-    const contents = await fetchLoreContents(activated.map((e) => e.id), (id) => spindle.world_books.entries.get(id, userId));
-    return {
-      block: assembleLoreBlock(contents, maxLorebookTokens),
-      activated: activated.length,
-      fetched: contents.length
-    };
-  } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    debug(userId, `fetchLoreBlock: failed (non-fatal): ${errMsg}`);
-    return { block: "", activated: 0, fetched: 0 };
-  }
-}
-async function buildContext(chatId, messageId, userId, settings) {
-  const messages = await getMessages(chatId);
-  const msgIndex = messages.findIndex((m) => m.id === messageId);
-  const message = messages[msgIndex];
-  if (!message) {
-    throw new Error(`Message ${messageId} not found in chat ${chatId}`);
-  }
-  const chat = await getChat(chatId, userId);
-  const characterId = chat?.character_id || undefined;
-  const isUserMessage = message.role === "user";
-  let latest;
-  let latestId;
-  if (isUserMessage) {
-    const prior = findLastAssistantMessage(messages, msgIndex - 1);
-    latest = prior?.message.content || "";
-    latestId = prior?.message.id || null;
-  } else {
-    latest = message.content || "";
-    latestId = messageId;
-  }
-  const totalBudget = settings.maxMessageContextTokens > 0 ? settings.maxMessageContextTokens : DEFAULT_MESSAGE_CONTEXT_TOKENS;
-  const historyBudget = Math.max(0, totalBudget - approxTokens(latest));
-  const history = buildChatHistoryBlock(messages, messages.length - 1, latestId, historyBudget);
-  const pov = await resolvePovContent(userId, isUserMessage ? settings.userPov : settings.pov);
-  const userMessage = isUserMessage ? message.content || "" : "";
-  const lore = await fetchLoreBlock(chatId, userId, settings.maxLorebookTokens);
-  debug(userId, `buildContext: msg=${messageId.slice(0, 8)} role=${message.role} latestLen=${latest.length} historyBudget=${historyBudget}tok historyLen=${history.length} povLen=${pov.length} userMessageLen=${userMessage.length} lore=${lore.activated}/${lore.fetched}`);
+var DEFAULT_REASONING = {
+  stripCoTTags: true,
+  requestReasoning: false,
+  reasoningEffort: "auto"
+};
+function getDefaultProfile() {
   return {
-    message,
-    characterId,
-    latest,
-    context: history,
-    pov,
-    userMessage,
-    loreBlock: lore.block
+    id: DEFAULT_PROFILE_ID,
+    name: "Default",
+    connectionProfileId: "",
+    samplers: { ...DEFAULT_SAMPLERS },
+    reasoning: { ...DEFAULT_REASONING }
   };
 }
+function normalizeSamplers(raw) {
+  const out = { ...DEFAULT_SAMPLERS };
+  if (!raw || typeof raw !== "object")
+    return out;
+  const s = raw;
+  for (const key of Object.keys(out)) {
+    const v = s[key];
+    out[key] = typeof v === "number" ? v : null;
+  }
+  return out;
+}
+function normalizeReasoning(raw) {
+  if (!raw || typeof raw !== "object")
+    return { ...DEFAULT_REASONING };
+  const r = raw;
+  return {
+    stripCoTTags: typeof r.stripCoTTags === "boolean" ? r.stripCoTTags : DEFAULT_REASONING.stripCoTTags,
+    requestReasoning: typeof r.requestReasoning === "boolean" ? r.requestReasoning : DEFAULT_REASONING.requestReasoning,
+    reasoningEffort: r.reasoningEffort ?? DEFAULT_REASONING.reasoningEffort
+  };
+}
+var service3 = createResourceService({
+  kind: "model profile",
+  prefix: "model-profiles/",
+  builtIns: [],
+  summarize: (item, builtIn) => ({
+    id: item.id,
+    name: item.name,
+    connectionProfileId: item.connectionProfileId,
+    builtIn
+  }),
+  normalize: (raw, id) => {
+    if (!raw || typeof raw !== "object")
+      return null;
+    const p = raw;
+    if (typeof p.name !== "string" || typeof p.connectionProfileId !== "string")
+      return null;
+    return {
+      id,
+      name: p.name,
+      connectionProfileId: p.connectionProfileId,
+      samplers: normalizeSamplers(p.samplers),
+      reasoning: normalizeReasoning(p.reasoning)
+    };
+  },
+  buildCopy: (source, newId, newName) => ({
+    id: newId,
+    name: newName,
+    connectionProfileId: source.connectionProfileId,
+    samplers: { ...source.samplers },
+    reasoning: { ...source.reasoning }
+  })
+});
+async function listModelProfiles(userId) {
+  const summaries = await service3.list(userId);
+  return summaries.map((s) => ({ id: s.id, name: s.name, connectionProfileId: s.connectionProfileId }));
+}
+function getModelProfile(userId, id) {
+  return service3.get(userId, id);
+}
+function saveModelProfile(userId, profile) {
+  return service3.save(userId, profile);
+}
+function deleteModelProfile(userId, id) {
+  return service3.delete(userId, id);
+}
+function duplicateModelProfile(userId, sourceId) {
+  return service3.duplicate(userId, sourceId);
+}
+async function createModelProfile(userId, connectionProfileId, name) {
+  const id = await service3.nextId(userId, name);
+  const profile = {
+    id,
+    name,
+    connectionProfileId,
+    samplers: { ...DEFAULT_SAMPLERS },
+    reasoning: { ...DEFAULT_REASONING }
+  };
+  await service3.save(userId, profile);
+  return profile;
+}
+
+// src/generation.ts
+function safeStringify(value) {
+  try {
+    return JSON.stringify(value);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    return `[unserializable: ${reason}]`;
+  }
+}
+function buildGenerationParameters(params) {
+  const result = {};
+  if (params.temperature !== null)
+    result.temperature = params.temperature;
+  if (params.maxTokens !== null)
+    result.max_tokens = params.maxTokens;
+  if (params.contextSize !== null)
+    result.max_context_length = params.contextSize;
+  if (params.topP !== null)
+    result.top_p = params.topP;
+  if (params.minP !== null)
+    result.min_p = params.minP;
+  if (params.topK !== null)
+    result.top_k = params.topK;
+  if (params.frequencyPenalty !== null)
+    result.frequency_penalty = params.frequencyPenalty;
+  if (params.presencePenalty !== null)
+    result.presence_penalty = params.presencePenalty;
+  if (params.repetitionPenalty !== null)
+    result.repetition_penalty = params.repetitionPenalty;
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+async function resolveConnection(connectionProfileId, userId) {
+  try {
+    if (connectionProfileId) {
+      const conn2 = await spindle.connections.get(connectionProfileId, userId);
+      if (!conn2)
+        return null;
+      return { id: conn2.id, model: conn2.model || undefined };
+    }
+    const conns = await spindle.connections.list(userId);
+    if (!conns || conns.length === 0)
+      return null;
+    const conn = conns.find((c) => c.is_default) || conns[0];
+    return { id: conn.id, model: conn.model || undefined };
+  } catch (err) {
+    spindle.log.warn(`resolveConnection failed: ${err instanceof Error ? err.message : err}`);
+    return null;
+  }
+}
+async function generate(req, userId) {
+  try {
+    const timeoutMs = req.timeoutSeconds * 1000;
+    const resolved = await resolveConnection(req.connectionProfileId, userId);
+    if (!resolved) {
+      const reason = req.connectionProfileId ? `Connection profile "${req.connectionProfileId}" not found` : "No connection profiles configured. Set a default in Lumiverse Settings -> Connections";
+      spindle.log.warn(`Generation failed: ${reason}`);
+      return { content: "", success: false, error: reason };
+    }
+    const parameters = { ...req.parameters };
+    if (resolved.model)
+      parameters.model = resolved.model;
+    debug(userId, `Generation: connection=${resolved.id}${req.connectionProfileId ? "" : " (default)"}, model=${resolved.model || "none"}, msgs=${req.messages.length}, params=${JSON.stringify(parameters)}`);
+    if (isFullPayloadEnabled(userId)) {
+      debug(userId, `Generation request messages: ${safeStringify(req.messages)}`);
+    }
+    const result = await Promise.race([
+      spindle.generate.raw({
+        type: "raw",
+        messages: req.messages,
+        connection_id: resolved.id,
+        model: resolved.model,
+        parameters,
+        userId
+      }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Generation timed out")), timeoutMs))
+    ]);
+    if (isFullPayloadEnabled(userId)) {
+      debug(userId, `Generation response: ${safeStringify(result)}`);
+    }
+    return { content: result.content ?? "", success: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    spindle.log.warn(`Generation failed: ${message}`);
+    return { content: "", success: false, error: message };
+  }
+}
+
+// src/refinement/model-resolver.ts
 async function resolveProfile(profileId, userId, onMissingClear) {
   let profile;
   if (!profileId || profileId === DEFAULT_PROFILE_ID) {
@@ -5569,6 +5223,98 @@ function injectReasoningParams(base, reasoning) {
   }
   return params;
 }
+
+// src/text/extract.ts
+var COT_WRAPPERS = ["think", "thinking", "reasoning"];
+function removeCoTTags(text) {
+  const alternation = COT_WRAPPERS.join("|");
+  const closed = new RegExp(`\\s*<(${alternation})>[\\s\\S]*?<\\/\\1>\\s*`, "gi");
+  const unclosed = new RegExp(`\\s*<(${alternation})>[\\s\\S]*$`, "i");
+  return text.replace(closed, "").replace(unclosed, "").trim();
+}
+function parseTaggedBlock(raw, tag = "HONE-OUTPUT") {
+  const open = `<${tag}>`;
+  const close = `</${tag}>`;
+  const start = raw.indexOf(open);
+  if (start === -1)
+    return null;
+  const contentStart = start + open.length;
+  const end = raw.indexOf(close, contentStart);
+  if (end === -1)
+    return { content: raw.slice(contentStart).trim(), unclosed: true };
+  return { content: raw.slice(contentStart, end).trim(), unclosed: false };
+}
+var NOTES_OPEN = "<HONE-NOTES>";
+var NOTES_CLOSE = "</HONE-NOTES>";
+var OUTPUT_OPEN = "<HONE-OUTPUT>";
+var OUTPUT_CLOSE = "</HONE-OUTPUT>";
+function extractRefinedContent(raw) {
+  if (raw.includes(OUTPUT_OPEN)) {
+    const parsed = parseTaggedBlock(raw);
+    if (!parsed) {
+      return {
+        ok: false,
+        reason: "no_tags",
+        message: "The LLM response was empty or unparseable even though <HONE-OUTPUT> was detected. Hone will not apply it."
+      };
+    }
+    const recoveries2 = [];
+    if (parsed.unclosed) {
+      recoveries2.push("<HONE-OUTPUT> opened but </HONE-OUTPUT> missing. Taking everything after <HONE-OUTPUT> as output (likely truncated or the model forgot the closing tag)");
+    }
+    if (!parsed.content) {
+      return {
+        ok: false,
+        reason: "notes_only",
+        message: "The LLM opened <HONE-OUTPUT> but wrote nothing inside it. Hone will not apply an empty refinement."
+      };
+    }
+    return { ok: true, content: parsed.content, recoveries: recoveries2 };
+  }
+  if (raw.includes(OUTPUT_CLOSE)) {
+    return {
+      ok: false,
+      reason: "malformed_partial",
+      message: "The LLM wrote </HONE-OUTPUT> without an opening <HONE-OUTPUT> tag, so Hone can't tell what the refined content was meant to be. Try again or switch to the non-Lite preset."
+    };
+  }
+  const recoveries = [];
+  let text = raw;
+  const hasNotesOpen = text.includes(NOTES_OPEN);
+  const hasNotesClose = text.includes(NOTES_CLOSE);
+  if (hasNotesClose && !hasNotesOpen) {
+    text = NOTES_OPEN + text;
+    recoveries.push("</HONE-NOTES> found without a matching <HONE-NOTES> opener. Prepended <HONE-NOTES> so the notes block can be stripped");
+  } else if (hasNotesOpen && !hasNotesClose) {
+    return {
+      ok: false,
+      reason: "malformed_partial",
+      message: "The LLM opened a <HONE-NOTES> block but never closed it, and didn't write <HONE-OUTPUT>. Hone can't tell where notes end and refined content begins. Try again or switch to the non-Lite preset."
+    };
+  }
+  const notesStart = text.indexOf(NOTES_OPEN);
+  const notesEnd = notesStart !== -1 ? text.indexOf(NOTES_CLOSE, notesStart + NOTES_OPEN.length) : -1;
+  if (notesStart !== -1 && notesEnd !== -1) {
+    text = (text.slice(0, notesStart) + text.slice(notesEnd + NOTES_CLOSE.length)).trim();
+    recoveries.push(recoveries.length === 0 ? "stripped <HONE-NOTES>...</HONE-NOTES> block" : "stripped the recovered <HONE-NOTES>...</HONE-NOTES> block");
+    if (!text) {
+      return {
+        ok: false,
+        reason: "notes_only",
+        message: "The LLM only produced a <HONE-NOTES> changelog. There was no refined content after stripping it. Try again or switch to the non-Lite preset."
+      };
+    }
+    recoveries.push("no <HONE-OUTPUT> tag found; using the notes-stripped response as output");
+    return { ok: true, content: text, recoveries };
+  }
+  return {
+    ok: false,
+    reason: "no_tags",
+    message: "The LLM did not output any <HONE-NOTES> or <HONE-OUTPUT> tags at all. Hone can't be confident the response is a valid refinement. Try again or switch to the non-Lite preset."
+  };
+}
+
+// src/refinement/strategy.ts
 async function runPipeline(pipeline, input, initialLatest, proposals, emitStages) {
   const results = [];
   let latest = initialLatest;
@@ -5609,9 +5355,8 @@ async function runPipeline(pipeline, input, initialLatest, proposals, emitStages
       debug(input.userId, `stage "${stage.name}": output-format failure "${extracted.reason}": ${extracted.message}`);
       throw new Error(extracted.message);
     }
-    for (const r of extracted.recoveries) {
+    for (const r of extracted.recoveries)
       debug(input.userId, `stage "${stage.name}": ${r}`);
-    }
     latest = extracted.content;
     if (emitStages) {
       const record = { index: i, name: stage.name, text: latest, kind: "step" };
@@ -5654,9 +5399,8 @@ async function runParallel(input) {
       debug(input.userId, `runParallel: proposal ${i + 1} failed: ${reason}`);
     }
   }
-  if (proposalOutputs.length === 0) {
+  if (proposalOutputs.length === 0)
     throw new Error("All parallel proposals failed");
-  }
   const aggregatorRun = await runPipeline(parallel.aggregator, input, input.latest, proposalOutputs, true);
   return {
     refinedText: aggregatorRun.finalText,
@@ -5666,11 +5410,9 @@ async function runParallel(input) {
 }
 async function runStrategy(input) {
   debug(input.userId, `runStrategy: preset="${input.preset.name}" strategy=${input.preset.strategy} messageLen=${input.messageText.length} latestLen=${input.latest.length} contextLen=${input.context.length}`);
-  if (input.preset.strategy === "parallel") {
+  if (input.preset.strategy === "parallel")
     return runParallel(input);
-  }
   if (!input.preset.pipeline) {
-    debug(input.userId, `runStrategy: FAILED: strategy=pipeline but no pipeline object`);
     throw new Error(`Preset "${input.preset.id}" has strategy=pipeline but no pipeline configured`);
   }
   debug(input.userId, `runStrategy: executing pipeline with ${input.preset.pipeline.stages.length} stages`);
@@ -5678,6 +5420,101 @@ async function runStrategy(input) {
   debug(input.userId, `runStrategy: pipeline complete: finalLen=${run.finalText.length} stages=${run.stages.length}`);
   return { refinedText: run.finalText, stages: run.stages, strategy: "pipeline" };
 }
+
+// src/lore.ts
+async function fetchLoreContents(entryIds, getEntry) {
+  const results = await Promise.allSettled(entryIds.map((id) => getEntry(id)));
+  const contents = [];
+  for (const r of results) {
+    if (r.status === "fulfilled" && r.value && r.value.content) {
+      contents.push(r.value.content);
+    }
+  }
+  return contents;
+}
+function assembleLoreBlock(contents, maxTokens) {
+  if (contents.length === 0)
+    return "";
+  const block = contents.join(`
+
+`);
+  if (maxTokens <= 0)
+    return block;
+  const charCap = maxTokens * 4;
+  return block.length > charCap ? block.slice(0, charCap) : block;
+}
+
+// src/refinement/context.ts
+var DEFAULT_MESSAGE_CONTEXT_TOKENS = 4000;
+async function fetchLoreBlock(chatId, userId, maxLorebookTokens) {
+  try {
+    const activated = await spindle.world_books.getActivated(chatId, userId);
+    if (!activated || activated.length === 0) {
+      return { block: "", activated: 0, fetched: 0 };
+    }
+    const contents = await fetchLoreContents(activated.map((e) => e.id), (id) => spindle.world_books.entries.get(id, userId));
+    return {
+      block: assembleLoreBlock(contents, maxLorebookTokens),
+      activated: activated.length,
+      fetched: contents.length
+    };
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    debug(userId, `fetchLoreBlock: failed (non-fatal): ${errMsg}`);
+    return { block: "", activated: 0, fetched: 0 };
+  }
+}
+function buildShieldPreservationNote(blocks) {
+  if (blocks.length === 0)
+    return "";
+  const tokens = blocks.map((b) => b.placeholder).join(", ");
+  return `IMPORTANT: opaque placeholder tokens: ${tokens}. ` + "Include each of these tokens through to your output EXACTLY as-is. " + "Do not edit, translate, reformat, split across lines, quote, or remove them. " + "They stand in for scaffolding that must round-trip unchanged.";
+}
+function findLastAssistantMessage(messages, fromIndex) {
+  for (let i = Math.min(fromIndex, messages.length - 1);i >= 0; i--) {
+    if (messages[i].role === "assistant")
+      return { message: messages[i], index: i };
+  }
+  return null;
+}
+async function buildContext(chatId, messageId, userId, settings) {
+  const messages = await spindle.chat.getMessages(chatId);
+  const msgIndex = messages.findIndex((m) => m.id === messageId);
+  const message = messages[msgIndex];
+  if (!message)
+    throw new Error(`Message ${messageId} not found in chat ${chatId}`);
+  const chat = await spindle.chats.get(chatId, userId);
+  const characterId = chat?.character_id || undefined;
+  const isUserMessage = message.role === "user";
+  let latest;
+  let latestId;
+  if (isUserMessage) {
+    const prior = findLastAssistantMessage(messages, msgIndex - 1);
+    latest = prior?.message.content || "";
+    latestId = prior?.message.id || null;
+  } else {
+    latest = message.content || "";
+    latestId = messageId;
+  }
+  const totalBudget = settings.maxMessageContextTokens > 0 ? settings.maxMessageContextTokens : DEFAULT_MESSAGE_CONTEXT_TOKENS;
+  const historyBudget = Math.max(0, totalBudget - approxTokens(latest));
+  const history = buildChatHistoryBlock(messages, messages.length - 1, latestId, historyBudget);
+  const pov = await resolvePovContent(userId, isUserMessage ? settings.userPov : settings.pov);
+  const userMessage = isUserMessage ? message.content || "" : "";
+  const lore = await fetchLoreBlock(chatId, userId, settings.maxLorebookTokens);
+  debug(userId, `buildContext: msg=${messageId.slice(0, 8)} role=${message.role} latestLen=${latest.length} historyBudget=${historyBudget}tok historyLen=${history.length} povLen=${pov.length} userMessageLen=${userMessage.length} lore=${lore.activated}/${lore.fetched}`);
+  return {
+    message,
+    characterId,
+    latest,
+    context: history,
+    pov,
+    userMessage,
+    loreBlock: lore.block
+  };
+}
+
+// src/refinement/index.ts
 async function refineSingle(chatId, messageId, userId, send) {
   let success = false;
   debug(userId, `refineSingle: enqueued ${messageId.slice(0, 8)} in ${chatId.slice(0, 8)}`);
@@ -5775,7 +5612,7 @@ async function refineSingle(chatId, messageId, userId, send) {
         refinedText = unmaskLiteralBlocks(refinedText, blocks);
         debug(userId, `refineSingle: unmask done: outputLen ${before} -> ${refinedText.length}`);
       }
-      const fresh = (await getMessages(chatId)).find((m) => m.id === messageId);
+      const fresh = (await spindle.chat.getMessages(chatId)).find((m) => m.id === messageId);
       if (!fresh) {
         debug(userId, `refineSingle: race guard ${messageId.slice(0, 8)}: message no longer exists`);
         send({ type: "refine-error", messageId, error: "Message no longer exists" });
@@ -5783,12 +5620,20 @@ async function refineSingle(chatId, messageId, userId, send) {
       }
       if (fresh.swipe_id !== startSwipeId) {
         debug(userId, `Refine aborted for ${messageId}: swipe navigated ${startSwipeId} -> ${fresh.swipe_id} during generation`);
-        send({ type: "refine-error", messageId, error: "Swipe changed during refinement; refinement cancelled to avoid overwriting the wrong swipe" });
+        send({
+          type: "refine-error",
+          messageId,
+          error: "Swipe changed during refinement; refinement cancelled to avoid overwriting the wrong swipe"
+        });
         return;
       }
       if (fresh.content !== startContent) {
         debug(userId, `Refine aborted for ${messageId}: swipe ${startSwipeId} content edited during generation (startLen=${startContent.length}, freshLen=${fresh.content?.length ?? -1})`);
-        send({ type: "refine-error", messageId, error: "Message content was edited during refinement; refinement cancelled to avoid overwriting your edit" });
+        send({
+          type: "refine-error",
+          messageId,
+          error: "Message content was edited during refinement; refinement cancelled to avoid overwriting your edit"
+        });
         return;
       }
       debug(userId, `refineSingle: race guard passed for ${messageId.slice(0, 8)} swipe ${startSwipeId}`);
@@ -5803,7 +5648,7 @@ async function refineSingle(chatId, messageId, userId, send) {
       await saveUndo(userId, chatId, messageId, startSwipeId, undoEntry);
       debug(userId, `refineSingle: saveUndo done ${messageId.slice(0, 8)} swipe ${startSwipeId} stages=${stageResults.length}`);
       try {
-        await updateMessage(chatId, messageId, {
+        await spindle.chat.updateMessage(chatId, messageId, {
           content: refinedText,
           metadata: { ...message.metadata, hone_refined: true }
         });
@@ -5811,11 +5656,9 @@ async function refineSingle(chatId, messageId, userId, send) {
       } catch (updateErr) {
         const updateError = updateErr instanceof Error ? updateErr.message : String(updateErr);
         spindle.log.warn(`[Hone] rollback: updateMessage failed for ${messageId} swipe ${startSwipeId} after saveUndo succeeded: ${updateError}; deleting orphan undo entry`);
-        debug(userId, `refineSingle: ROLLBACK updateMessage failed ${messageId.slice(0, 8)}: ${updateError}`);
         try {
           await deleteUndo(userId, chatId, messageId, startSwipeId);
           spindle.log.warn(`[Hone] rollback: orphan undo entry deleted for ${messageId} swipe ${startSwipeId}`);
-          debug(userId, `refineSingle: ROLLBACK orphan undo deleted ${messageId.slice(0, 8)}`);
         } catch (rollbackErr) {
           const rollbackError = rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr);
           spindle.log.error(`[Hone] rollback FAILED for ${messageId} swipe ${startSwipeId}: ${rollbackError}; orphan undo entry will remain until next refine or prune`);
@@ -5847,7 +5690,7 @@ async function undoRefine(chatId, messageId, userId, send) {
   return enqueueChatOperation(`${userId}:${chatId}`, async () => {
     debug(userId, `undoRefine: queue slot started ${messageId.slice(0, 8)}`);
     try {
-      const currentMsg = (await getMessages(chatId)).find((m) => m.id === messageId);
+      const currentMsg = (await spindle.chat.getMessages(chatId)).find((m) => m.id === messageId);
       if (!currentMsg) {
         debug(userId, `undoRefine: ${messageId.slice(0, 8)}: message not found`);
         send({ type: "refine-error", messageId, error: "Undo failed: message not found" });
@@ -5861,7 +5704,7 @@ async function undoRefine(chatId, messageId, userId, send) {
         return;
       }
       debug(userId, `undoRefine: applying ${messageId.slice(0, 8)} swipe ${targetSwipeId} origLen=${entry.originalContent.length}`);
-      await updateMessage(chatId, messageId, {
+      await spindle.chat.updateMessage(chatId, messageId, {
         content: entry.originalContent,
         metadata: { ...currentMsg.metadata || {}, hone_refined: false }
       });
@@ -5924,11 +5767,10 @@ async function enhanceUserMessage(text, chatId, userId, mode, send) {
   }
   if (mode === "post") {
     try {
-      const messages = await getMessages(chatId);
+      const messages = await spindle.chat.getMessages(chatId);
       const userMsg = [...messages].reverse().find((m) => m.role === "user");
-      if (userMsg) {
+      if (userMsg)
         await refineSingle(chatId, userMsg.id, userId, send);
-      }
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       send({ type: "refine-error", messageId: "", error });
@@ -5947,9 +5789,9 @@ async function enhanceUserMessage(text, chatId, userId, mode, send) {
     }
     debug(userId, `enhanceUserMessage: input preset="${preset.name}" strategy=${preset.strategy}`);
     const model = await resolveModel(settings, userId);
-    const chat = await getChat(chatId, userId);
+    const chat = await spindle.chats.get(chatId, userId);
     const characterId = chat?.character_id || undefined;
-    const messages = await getMessages(chatId);
+    const messages = await spindle.chat.getMessages(chatId);
     const prior = findLastAssistantMessage(messages, messages.length - 1);
     const latest = prior?.message.content || "";
     const latestId = prior?.message.id || null;
@@ -5992,17 +5834,16 @@ async function previewStage(preset, stage, stageIndex, totalStages, userId, prop
   let resolveChatId;
   if (chatId) {
     try {
-      const messages = await getMessages(chatId);
+      const messages = await spindle.chat.getMessages(chatId);
       const prior = findLastAssistantMessage(messages, messages.length - 1);
-      if (prior && prior.message.content) {
+      if (prior && prior.message.content)
         latest = prior.message.content;
-      }
       const latestId = prior?.message.id || null;
       const totalBudget = settings.maxMessageContextTokens > 0 ? settings.maxMessageContextTokens : DEFAULT_MESSAGE_CONTEXT_TOKENS;
       const historyBudget = Math.max(0, totalBudget - approxTokens(latest));
       context = buildChatHistoryBlock(messages, messages.length - 1, latestId, historyBudget);
       pov = await resolvePovContent(userId, slot === "input" ? settings.userPov : settings.pov);
-      const chat = await getChat(chatId, userId);
+      const chat = await spindle.chats.get(chatId, userId);
       characterId = chat?.character_id || undefined;
       resolveChatId = chatId;
       const lore = await fetchLoreBlock(chatId, userId, settings.maxLorebookTokens);
@@ -6035,41 +5876,7 @@ async function previewStage(preset, stage, stageIndex, totalStages, userId, prop
   return { messages: assembled.messages, diagnostics: assembled.diagnostics };
 }
 
-// src/backend.ts
-var grantedPermissions = new Set;
-async function initPermissions() {
-  try {
-    const granted = await spindle.permissions.getGranted();
-    for (const p of granted)
-      grantedPermissions.add(p);
-    spindle.log.info(`Permissions initialized: ${[...grantedPermissions].join(", ") || "none"}`);
-  } catch (err) {
-    spindle.log.warn(`Failed to load permissions: ${err instanceof Error ? err.message : err}`);
-  }
-}
-function hasPermission(p) {
-  return grantedPermissions.has(p);
-}
-spindle.permissions.onChanged((detail) => {
-  grantedPermissions.clear();
-  for (const p of detail.allGranted)
-    grantedPermissions.add(p);
-  spindle.log.info(`Permissions updated: ${detail.allGranted.join(", ") || "none"}`);
-});
-spindle.permissions.onDenied((detail) => {
-  spindle.log.warn(`Permission denied: ${detail.permission} for ${detail.operation}`);
-});
-function sendTo(msg, userId) {
-  spindle.sendToFrontend(msg, userId);
-}
-function requirePermission(permission, userId, messageId) {
-  if (hasPermission(permission))
-    return true;
-  const errorMsg = `Missing '${permission}' permission. Grant it in extension settings.`;
-  spindle.log.warn(errorMsg);
-  sendTo({ type: "refine-error", messageId: messageId || "", error: errorMsg }, userId);
-  return false;
-}
+// src/backend/chat-state.ts
 async function getActiveChatIdFor(userId) {
   try {
     const active = await spindle.chats.getActive(userId);
@@ -6112,7 +5919,7 @@ async function snapshotLastAiState(userId, chatId) {
     return { messageId: null, refined: false, refinedMessageIds: [] };
   }
 }
-async function sendRefinedStateFor(userId) {
+async function sendRefinedStateFor(userId, send) {
   const chatId = await getActiveChatIdFor(userId);
   if (!chatId) {
     debug(userId, `sendRefinedStateFor: no active chat`);
@@ -6120,729 +5927,38 @@ async function sendRefinedStateFor(userId) {
   }
   const snap = await snapshotLastAiState(userId, chatId);
   debug(userId, `sendRefinedStateFor: chat=${chatId.slice(0, 8)} lastRefined=${snap.refined} lastMsg=${snap.messageId?.slice(0, 8) ?? "none"} stages=${snap.stages?.length ?? 0} refinedCount=${snap.refinedMessageIds.length}`);
-  sendTo({
+  send({
     type: "active-chat",
     chatId,
     lastMessageRefined: snap.refined,
     lastAiMessageId: snap.messageId,
     lastAiStages: snap.stages,
     refinedMessageIds: snap.refinedMessageIds
-  }, userId);
+  });
 }
-function bindSender(userId) {
-  return (msg) => sendTo(msg, userId);
-}
-spindle.onFrontendMessage(async (raw, userId) => {
-  const msg = raw;
-  debug(userId, `IPC received: ${msg?.type || "unknown"}`);
-  if (!msg || typeof msg.type !== "string") {
-    spindle.log.warn("Received invalid IPC message (missing type)");
-    return;
-  }
-  debug(userId, `ipc in: ${msg.type}${"chatId" in msg && typeof msg.chatId === "string" ? ` chatId=${msg.chatId.slice(0, 8)}` : ""}${"messageId" in msg && typeof msg.messageId === "string" ? ` msgId=${msg.messageId.slice(0, 8)}` : ""}`);
-  const send = bindSender(userId);
-  try {
-    switch (msg.type) {
-      case "refine":
-        if (!requirePermission("chat_mutation", userId, msg.messageId))
-          break;
-        debug(userId, `Refining message ${msg.messageId} in chat ${msg.chatId}`);
-        await refineSingle(msg.chatId, msg.messageId, userId, send);
-        await sendRefinedStateFor(userId);
-        break;
-      case "undo":
-        if (!requirePermission("chat_mutation", userId, msg.messageId))
-          break;
-        debug(userId, `Undoing refinement for ${msg.messageId} in chat ${msg.chatId}`);
-        await undoRefine(msg.chatId, msg.messageId, userId, send);
-        await sendRefinedStateFor(userId);
-        break;
-      case "bulk-refine":
-        if (!requirePermission("chat_mutation", userId))
-          break;
-        debug(userId, `Bulk refining ${msg.messageIds.length} messages in chat ${msg.chatId}`);
-        await refineBulk(msg.chatId, msg.messageIds, userId, send);
-        break;
-      case "enhance":
-        if (!requirePermission("chat_mutation", userId))
-          break;
-        debug(userId, `Enhancing user message in chat ${msg.chatId} (mode: ${msg.mode})`);
-        await enhanceUserMessage(msg.text, msg.chatId, userId, msg.mode, send);
-        break;
-      case "get-settings": {
-        const settings = await getSettings(userId);
-        send({ type: "settings", settings });
-        break;
-      }
-      case "update-settings": {
-        const updated = await updateSettings(userId, msg.settings);
-        send({ type: "settings", settings: updated });
-        if ("debugLogging" in msg.settings || "debugLogMaxEntries" in msg.settings) {
-          const stats = bufferStats(userId);
-          send({
-            type: "debug-logs",
-            formatted: formatLogs(userId),
-            count: stats.count,
-            capacity: stats.capacity,
-            enabled: stats.enabled
-          });
-        }
-        break;
-      }
-      case "get-stats": {
-        if (!requirePermission("chats", userId))
-          break;
-        const stats = await getStats(userId, msg.chatId);
-        send({ type: "stats", stats });
-        break;
-      }
-      case "view-diff": {
-        if (!requirePermission("chats", userId, msg.messageId))
-          break;
-        try {
-          const messages = await spindle.chat.getMessages(msg.chatId);
-          const targetMsg = messages.find((m) => m.id === msg.messageId);
-          if (!targetMsg) {
-            send({ type: "refine-error", messageId: msg.messageId, error: "Message not found" });
-            break;
-          }
-          const entry = await getUndo(userId, msg.chatId, msg.messageId, targetMsg.swipe_id);
-          if (entry) {
-            send({ type: "diff", original: entry.originalContent, refined: entry.refinedContent });
-          } else {
-            send({ type: "refine-error", messageId: msg.messageId, error: "No diff data found for this swipe" });
-          }
-        } catch (err) {
-          const error = err instanceof Error ? err.message : String(err);
-          debug(userId, `ipc view-diff: FAILED: ${error}`);
-          send({ type: "refine-error", messageId: msg.messageId, error });
-        }
-        break;
-      }
-      case "list-presets": {
-        debug(userId, `ipc list-presets: fetching`);
-        const presets = await listPresets(userId);
-        const settings = await getSettings(userId);
-        debug(userId, `ipc list-presets: returning ${presets.length} presets, activeId="${settings.currentPresetId}"`);
-        send({ type: "presets", presets, activeId: settings.currentPresetId, activeInputId: settings.currentInputPresetId });
-        break;
-      }
-      case "get-preset": {
-        debug(userId, `ipc get-preset: id="${msg.id}"`);
-        const preset = await getPreset(userId, msg.id);
-        if (!preset) {
-          debug(userId, `ipc get-preset: "${msg.id}" not found, falling back`);
-          const settings = await getSettings(userId);
-          const presets = await listPresets(userId);
-          send({ type: "presets", presets, activeId: settings.currentPresetId, activeInputId: settings.currentInputPresetId });
-          break;
-        }
-        debug(userId, `ipc get-preset: sending "${preset.name}" strategy=${preset.strategy} prompts=${preset.prompts.length}`);
-        send({ type: "preset", preset });
-        break;
-      }
-      case "save-preset": {
-        debug(userId, `ipc save-preset: id="${msg.preset.id}" name="${msg.preset.name}"`);
-        try {
-          await savePreset(userId, msg.preset);
-          const presets = await listPresets(userId);
-          const settings = await getSettings(userId);
-          debug(userId, `ipc save-preset: saved successfully, pushing updated list`);
-          send({ type: "presets", presets, activeId: settings.currentPresetId, activeInputId: settings.currentInputPresetId });
-        } catch (err) {
-          const error = err instanceof Error ? err.message : String(err);
-          debug(userId, `ipc save-preset: FAILED: ${error}`);
-          spindle.log.warn(`[Hone] save-preset failed: ${error}`);
-          send({ type: "preset-import-result", success: false, error });
-        }
-        break;
-      }
-      case "delete-preset": {
-        debug(userId, `ipc delete-preset: id="${msg.id}"`);
-        try {
-          await deletePreset(userId, msg.id);
-          debug(userId, `ipc delete-preset: deleted "${msg.id}"`);
-        } catch (err) {
-          const error = err instanceof Error ? err.message : String(err);
-          debug(userId, `ipc delete-preset: FAILED: ${error}`);
-          spindle.log.warn(`[Hone] delete-preset failed: ${error}`);
-          send({ type: "refine-error", messageId: "", error: `Failed to delete preset: ${error}` });
-          const presets2 = await listPresets(userId);
-          const settings2 = await getSettings(userId);
-          send({ type: "presets", presets: presets2, activeId: settings2.currentPresetId, activeInputId: settings2.currentInputPresetId });
-          break;
-        }
-        const settings = await getSettings(userId);
-        const { DEFAULT_ACTIVE_PRESET_ID: DEFAULT_ACTIVE_PRESET_ID2, DEFAULT_INPUT_ACTIVE_PRESET_ID: DEFAULT_INPUT_ACTIVE_PRESET_ID2 } = await Promise.resolve().then(() => (init_preset_defaults(), exports_preset_defaults));
-        const fallbacks = {};
-        if (settings.currentPresetId === msg.id) {
-          debug(userId, `ipc delete-preset: deleted active output preset, falling back to "${DEFAULT_ACTIVE_PRESET_ID2}"`);
-          fallbacks.currentPresetId = DEFAULT_ACTIVE_PRESET_ID2;
-        }
-        if (settings.currentInputPresetId === msg.id) {
-          debug(userId, `ipc delete-preset: deleted active input preset, falling back to "${DEFAULT_INPUT_ACTIVE_PRESET_ID2}"`);
-          fallbacks.currentInputPresetId = DEFAULT_INPUT_ACTIVE_PRESET_ID2;
-        }
-        if (Object.keys(fallbacks).length > 0) {
-          await updateSettings(userId, fallbacks);
-        }
-        const presets = await listPresets(userId);
-        const freshSettings = await getSettings(userId);
-        send({ type: "presets", presets, activeId: freshSettings.currentPresetId, activeInputId: freshSettings.currentInputPresetId });
-        break;
-      }
-      case "duplicate-preset": {
-        debug(userId, `ipc duplicate-preset: source="${msg.id}" slot=${msg.slot}`);
-        try {
-          const copy = await duplicatePreset(userId, msg.id);
-          debug(userId, `ipc duplicate-preset: created "${copy.name}" (id="${copy.id}"), setting as active ${msg.slot} preset`);
-          const settingsKey = msg.slot === "input" ? "currentInputPresetId" : "currentPresetId";
-          await updateSettings(userId, { [settingsKey]: copy.id });
-          const presets = await listPresets(userId);
-          const dupSettings = await getSettings(userId);
-          send({ type: "presets", presets, activeId: dupSettings.currentPresetId, activeInputId: dupSettings.currentInputPresetId });
-          send({ type: "preset", preset: copy });
-        } catch (err) {
-          const error = err instanceof Error ? err.message : String(err);
-          debug(userId, `ipc duplicate-preset: FAILED: ${error}`);
-          spindle.log.warn(`[Hone] duplicate-preset failed: ${error}`);
-          send({ type: "preset-import-result", success: false, error });
-        }
-        break;
-      }
-      case "set-active-preset": {
-        debug(userId, `ipc set-active-preset: id="${msg.id}" slot=${msg.slot}`);
-        const preset = await getPreset(userId, msg.id);
-        if (!preset) {
-          debug(userId, `ipc set-active-preset: "${msg.id}" not found`);
-          spindle.log.warn(`[Hone] set-active-preset: preset "${msg.id}" not found`);
-          break;
-        }
-        const settingsKey = msg.slot === "input" ? "currentInputPresetId" : "currentPresetId";
-        await updateSettings(userId, { [settingsKey]: msg.id });
-        debug(userId, `ipc set-active-preset: switched ${msg.slot} to "${preset.name}"`);
-        const presets = await listPresets(userId);
-        const setActiveSettings = await getSettings(userId);
-        send({ type: "presets", presets, activeId: setActiveSettings.currentPresetId, activeInputId: setActiveSettings.currentInputPresetId });
-        send({ type: "preset", preset });
-        break;
-      }
-      case "export-preset": {
-        debug(userId, `ipc export-preset: id="${msg.id}"`);
-        try {
-          const exported = await exportPreset(userId, msg.id);
-          debug(userId, `ipc export-preset: exported "${exported.name}": ${exported.json.length} chars`);
-          send({
-            type: "preset-exported",
-            id: exported.id,
-            name: exported.name,
-            json: exported.json
-          });
-        } catch (err) {
-          const error = err instanceof Error ? err.message : String(err);
-          debug(userId, `ipc export-preset: FAILED: ${error}`);
-          spindle.log.warn(`[Hone] export-preset failed: ${error}`);
-          send({ type: "preset-import-result", success: false, error });
-        }
-        break;
-      }
-      case "import-preset": {
-        debug(userId, `ipc import-preset: ${msg.json.length} chars slot=${msg.slot}`);
-        try {
-          const imported = await importPreset(userId, msg.json, msg.slot);
-          debug(userId, `ipc import-preset: saved "${imported.name}" (id="${imported.id}"), setting as active ${msg.slot} preset`);
-          const settingsKey = msg.slot === "input" ? "currentInputPresetId" : "currentPresetId";
-          await updateSettings(userId, { [settingsKey]: imported.id });
-          const presets = await listPresets(userId);
-          const importSettings = await getSettings(userId);
-          send({ type: "presets", presets, activeId: importSettings.currentPresetId, activeInputId: importSettings.currentInputPresetId });
-          send({ type: "preset", preset: imported });
-          send({ type: "preset-import-result", success: true, id: imported.id });
-        } catch (err) {
-          const error = err instanceof Error ? err.message : String(err);
-          debug(userId, `ipc import-preset: FAILED: ${error}`);
-          spindle.log.warn(`[Hone] import-preset failed: ${error}`);
-          send({ type: "preset-import-result", success: false, error });
-        }
-        break;
-      }
-      case "preview-stage": {
-        const previewChatId = msg.chatId || await getActiveChatIdFor(userId) || undefined;
-        debug(userId, `ipc preview-stage: slot=${msg.slot} path=${JSON.stringify(msg.path)} stageIndex=${msg.stageIndex} chatId=${previewChatId?.slice(0, 8) || "none"} (resolved=${!msg.chatId})`);
-        try {
-          const settings = await getSettings(userId);
-          const presetId = msg.slot === "input" ? settings.currentInputPresetId : settings.currentPresetId;
-          const preset = await getPreset(userId, presetId);
-          if (!preset) {
-            debug(userId, `ipc preview-stage: no active ${msg.slot} preset (id="${presetId}")`);
-            spindle.log.warn(`[Hone] preview-stage: no active ${msg.slot} preset`);
-            break;
-          }
-          debug(userId, `ipc preview-stage: using preset="${preset.name}" strategy=${preset.strategy}`);
-          const pipeline = msg.path.kind === "pipeline" ? preset.pipeline : msg.path.kind === "proposal" ? preset.parallel?.proposals[msg.path.proposalIndex] : preset.parallel?.aggregator;
-          if (!pipeline) {
-            debug(userId, `ipc preview-stage: pipeline not found for path ${JSON.stringify(msg.path)}`);
-            spindle.log.warn(`[Hone] preview-stage: pipeline not found for path ${JSON.stringify(msg.path)}`);
-            break;
-          }
-          debug(userId, `ipc preview-stage: pipeline has ${pipeline.stages.length} stages`);
-          const stage = pipeline.stages[msg.stageIndex];
-          if (!stage) {
-            debug(userId, `ipc preview-stage: stage ${msg.stageIndex} out of range (max ${pipeline.stages.length - 1})`);
-            spindle.log.warn(`[Hone] preview-stage: stage ${msg.stageIndex} not found`);
-            break;
-          }
-          const proposals = msg.path.kind === "aggregator" && preset.parallel ? preset.parallel.proposals.map((_, i) => `<proposal ${i + 1} output: placeholder since no LLM was called for the preview>`) : undefined;
-          debug(userId, `ipc preview-stage: calling previewStage for "${stage.name}" (${msg.stageIndex}/${pipeline.stages.length})`);
-          const result = await previewStage(preset, stage, msg.stageIndex, pipeline.stages.length, userId, proposals, previewChatId, msg.slot);
-          debug(userId, `ipc preview-stage: done: ${result.messages.length} messages, ${result.diagnostics.length} diagnostics`);
-          send({
-            type: "preview-result",
-            path: msg.path,
-            stageIndex: msg.stageIndex,
-            messages: result.messages,
-            diagnostics: result.diagnostics
-          });
-        } catch (err) {
-          const error = err instanceof Error ? err.message : String(err);
-          debug(userId, `ipc preview-stage: FAILED: ${error}`);
-          spindle.log.warn(`[Hone] preview-stage failed: ${error}`);
-        }
-        break;
-      }
-      case "get-connections": {
-        if (!requirePermission("generation", userId))
-          break;
-        try {
-          const conns = await spindle.connections.list(userId);
-          send({
-            type: "connections",
-            connections: (conns ?? []).map((c) => ({
-              id: c.id,
-              name: c.name,
-              provider: c.provider || "",
-              model: c.model || "",
-              is_default: !!c.is_default,
-              has_api_key: !!c.has_api_key
-            }))
-          });
-        } catch (err) {
-          const error = err instanceof Error ? err.message : String(err);
-          spindle.log.warn(`get-connections failed: ${error}`);
-          send({ type: "connections", connections: [], error });
-        }
-        break;
-      }
-      case "get-active-chat": {
-        const chatId = await getActiveChatIdFor(userId);
-        debug(userId, `Active chat: ${chatId || "none"}`);
-        if (!chatId) {
-          send({
-            type: "active-chat",
-            chatId: null,
-            lastMessageRefined: false,
-            lastAiMessageId: null,
-            refinedMessageIds: []
-          });
-          break;
-        }
-        const snap = await snapshotLastAiState(userId, chatId);
-        send({
-          type: "active-chat",
-          chatId,
-          lastMessageRefined: snap.refined,
-          lastAiMessageId: snap.messageId,
-          lastAiStages: snap.stages,
-          refinedMessageIds: snap.refinedMessageIds
-        });
-        break;
-      }
-      case "refine-last": {
-        if (!requirePermission("chat_mutation", userId))
-          break;
-        if (!requirePermission("chats", userId))
-          break;
-        try {
-          const chatId = await getActiveChatIdFor(userId);
-          if (!chatId) {
-            send({ type: "refine-error", messageId: "", error: "No active chat" });
-            break;
-          }
-          const messages = await spindle.chat.getMessages(chatId);
-          const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
-          if (!lastAssistant) {
-            send({ type: "refine-error", messageId: "", error: "No assistant message found in chat" });
-            break;
-          }
-          debug(userId, `Refine-last: refining ${lastAssistant.id} in chat ${chatId}`);
-          await refineSingle(chatId, lastAssistant.id, userId, send);
-          await sendRefinedStateFor(userId);
-        } catch (err) {
-          const error = err instanceof Error ? err.message : String(err);
-          send({ type: "refine-error", messageId: "", error });
-        }
-        break;
-      }
-      case "undo-last": {
-        if (!requirePermission("chat_mutation", userId))
-          break;
-        if (!requirePermission("chats", userId))
-          break;
-        try {
-          const chatId = await getActiveChatIdFor(userId);
-          if (!chatId) {
-            send({ type: "refine-error", messageId: "", error: "No active chat" });
-            break;
-          }
-          const messages = await spindle.chat.getMessages(chatId);
-          const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
-          if (!lastAssistant) {
-            send({ type: "refine-error", messageId: "", error: "No assistant message in chat" });
-            break;
-          }
-          const entry = await getUndo(userId, chatId, lastAssistant.id, lastAssistant.swipe_id);
-          if (!entry) {
-            send({ type: "refine-error", messageId: "", error: "No undo available for the current swipe" });
-            break;
-          }
-          debug(userId, `Undo-last: undoing ${lastAssistant.id} swipe ${lastAssistant.swipe_id}`);
-          await undoRefine(chatId, lastAssistant.id, userId, send);
-          await sendRefinedStateFor(userId);
-        } catch (err) {
-          const error = err instanceof Error ? err.message : String(err);
-          send({ type: "refine-error", messageId: "", error });
-        }
-        break;
-      }
-      case "refine-all": {
-        if (!requirePermission("chat_mutation", userId))
-          break;
-        if (!requirePermission("chats", userId))
-          break;
-        try {
-          const chatId = await getActiveChatIdFor(userId);
-          if (!chatId) {
-            send({ type: "refine-error", messageId: "", error: "No active chat" });
-            break;
-          }
-          const messages = await spindle.chat.getMessages(chatId);
-          const assistantIds = messages.filter((m) => m.role === "assistant").map((m) => m.id);
-          if (assistantIds.length === 0) {
-            send({ type: "refine-error", messageId: "", error: "No assistant messages in chat" });
-            break;
-          }
-          debug(userId, `Refine-all: refining ${assistantIds.length} assistant messages in chat ${chatId}`);
-          await refineBulk(chatId, assistantIds, userId, send);
-          await sendRefinedStateFor(userId);
-        } catch (err) {
-          const error = err instanceof Error ? err.message : String(err);
-          send({ type: "refine-error", messageId: "", error });
-        }
-        break;
-      }
-      case "use-stage-version": {
-        if (!requirePermission("chat_mutation", userId))
-          break;
-        try {
-          const currentMsg = (await spindle.chat.getMessages(msg.chatId)).find((m) => m.id === msg.messageId);
-          if (!currentMsg) {
-            send({ type: "refine-error", messageId: msg.messageId, error: "Message not found" });
-            break;
-          }
-          const swipeId = currentMsg.swipe_id;
-          const existingEntry = await getUndo(userId, msg.chatId, msg.messageId, swipeId);
-          if (!existingEntry) {
-            send({ type: "refine-error", messageId: msg.messageId, error: "No active refinement on this swipe" });
-            break;
-          }
-          if (!existingEntry.stages || existingEntry.stages.length === 0) {
-            send({ type: "refine-error", messageId: msg.messageId, error: "This refinement has no pipeline stages to pick from" });
-            break;
-          }
-          const stage = existingEntry.stages.find((s) => s.index === msg.stageIndex && s.kind === msg.stageKind);
-          if (!stage) {
-            send({
-              type: "refine-error",
-              messageId: msg.messageId,
-              error: `Stage ${msg.stageKind}[${msg.stageIndex}] not found`
-            });
-            break;
-          }
-          const updatedEntry = {
-            ...existingEntry,
-            refinedContent: stage.text,
-            strategy: `stage-${stage.name}`,
-            timestamp: Date.now()
-          };
-          await saveUndo(userId, msg.chatId, msg.messageId, swipeId, updatedEntry);
-          try {
-            await spindle.chat.updateMessage(msg.chatId, msg.messageId, {
-              content: stage.text,
-              metadata: { ...currentMsg.metadata || {}, hone_refined: true }
-            });
-          } catch (updateErr) {
-            const updateError = updateErr instanceof Error ? updateErr.message : String(updateErr);
-            spindle.log.warn(`[Hone] rollback: use-stage-version updateMessage failed for ${msg.messageId} swipe ${swipeId}: ${updateError}; restoring prior undo entry`);
-            try {
-              await saveUndo(userId, msg.chatId, msg.messageId, swipeId, existingEntry);
-              spindle.log.warn(`[Hone] rollback: prior undo entry restored for ${msg.messageId} swipe ${swipeId}`);
-            } catch (rollbackErr) {
-              const rollbackError = rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr);
-              spindle.log.error(`[Hone] rollback FAILED for ${msg.messageId} swipe ${swipeId}: ${rollbackError}. Undo entry now points at a stage that was not applied; next refine/undo of this swipe will reconcile`);
-            }
-            throw updateErr;
-          }
-          send({ type: "diff", original: existingEntry.originalContent, refined: stage.text });
-          send({ type: "refine-complete", messageId: msg.messageId, success: true });
-          await sendRefinedStateFor(userId);
-        } catch (err) {
-          const error = err instanceof Error ? err.message : String(err);
-          send({ type: "refine-error", messageId: msg.messageId, error });
-        }
-        break;
-      }
-      case "list-model-profiles": {
-        debug(userId, `ipc in: list-model-profiles`);
-        const profiles = await listModelProfiles(userId);
-        send({ type: "model-profiles", profiles });
-        break;
-      }
-      case "get-model-profile": {
-        debug(userId, `ipc in: get-model-profile`);
-        const id = msg.id;
-        if (id === DEFAULT_PROFILE_ID) {
-          send({ type: "model-profile", profile: getDefaultProfile() });
-        } else {
-          const profile = await getModelProfile(userId, id);
-          if (profile) {
-            send({ type: "model-profile", profile });
-          } else {
-            debug(userId, `ipc get-model-profile: "${id}" not found, falling back to default`);
-            send({ type: "model-profile", profile: getDefaultProfile() });
-            const settings = await getSettings(userId);
-            if (settings.activeModelProfileId === id) {
-              await updateSettings(userId, { activeModelProfileId: "" });
-              send({ type: "settings", settings: { ...settings, activeModelProfileId: "" } });
-            }
-          }
-        }
-        break;
-      }
-      case "create-model-profile": {
-        debug(userId, `ipc in: create-model-profile`);
-        const profile = await createModelProfile(userId, msg.connectionProfileId, msg.name);
-        send({ type: "model-profile", profile });
-        await updateSettings(userId, { activeModelProfileId: profile.id });
-        const updatedSettings = await getSettings(userId);
-        send({ type: "settings", settings: updatedSettings });
-        send({ type: "model-profiles", profiles: await listModelProfiles(userId) });
-        break;
-      }
-      case "save-model-profile": {
-        debug(userId, `ipc in: save-model-profile`);
-        await saveModelProfile(userId, msg.profile);
-        send({ type: "model-profile", profile: msg.profile });
-        send({ type: "model-profiles", profiles: await listModelProfiles(userId) });
-        break;
-      }
-      case "delete-model-profile": {
-        debug(userId, `ipc in: delete-model-profile`);
-        await deleteModelProfile(userId, msg.id);
-        const settings = await getSettings(userId);
-        if (settings.activeModelProfileId === msg.id) {
-          await updateSettings(userId, { activeModelProfileId: "" });
-          const updatedSettings = await getSettings(userId);
-          send({ type: "settings", settings: updatedSettings });
-        }
-        send({ type: "model-profiles", profiles: await listModelProfiles(userId) });
-        break;
-      }
-      case "duplicate-model-profile": {
-        debug(userId, `ipc in: duplicate-model-profile`);
-        const dup = msg.id === DEFAULT_PROFILE_ID ? await createModelProfile(userId, "", "New Profile") : await duplicateModelProfile(userId, msg.id);
-        if (dup) {
-          await updateSettings(userId, { activeModelProfileId: dup.id });
-          const updatedSettings = await getSettings(userId);
-          send({ type: "settings", settings: updatedSettings });
-          send({ type: "model-profile", profile: dup });
-          send({ type: "model-profiles", profiles: await listModelProfiles(userId) });
-        } else {
-          debug(userId, `ipc duplicate-model-profile: source "${msg.id}" not found`);
-        }
-        break;
-      }
-      case "list-pov-presets": {
-        debug(userId, `ipc in: list-pov-presets`);
-        const presets = await listPovPresets(userId);
-        send({ type: "pov-presets", presets });
-        break;
-      }
-      case "save-pov-preset": {
-        debug(userId, `ipc in: save-pov-preset id="${msg.preset.id}"`);
-        try {
-          if (isBuiltInPovPresetId(msg.preset.id)) {
-            throw new Error(`Cannot save over built-in POV preset "${msg.preset.id}"; duplicate it first.`);
-          }
-          await savePovPreset(userId, msg.preset);
-          send({ type: "pov-presets", presets: await listPovPresets(userId) });
-        } catch (err) {
-          const error = err instanceof Error ? err.message : String(err);
-          spindle.log.warn(`[Hone] save-pov-preset failed: ${error}`);
-          send({ type: "pov-presets", presets: await listPovPresets(userId) });
-          send({ type: "pov-preset-error", error: `Failed to save POV preset: ${error}` });
-        }
-        break;
-      }
-      case "delete-pov-preset": {
-        debug(userId, `ipc in: delete-pov-preset id="${msg.id}"`);
-        try {
-          if (isBuiltInPovPresetId(msg.id)) {
-            throw new Error(`Cannot delete built-in POV preset "${msg.id}".`);
-          }
-          await deletePovPreset(userId, msg.id);
-          const settings = await getSettings(userId);
-          const patch = {};
-          if (settings.pov === msg.id)
-            patch.pov = DEFAULT_POV_PRESET_ID;
-          if (settings.userPov === msg.id)
-            patch.userPov = DEFAULT_USER_POV_PRESET_ID;
-          if (Object.keys(patch).length > 0) {
-            const updated = await updateSettings(userId, patch);
-            send({ type: "settings", settings: updated });
-          }
-          send({ type: "pov-presets", presets: await listPovPresets(userId) });
-        } catch (err) {
-          const error = err instanceof Error ? err.message : String(err);
-          spindle.log.warn(`[Hone] delete-pov-preset failed: ${error}`);
-          send({ type: "pov-presets", presets: await listPovPresets(userId) });
-          send({ type: "pov-preset-error", error: `Failed to delete POV preset: ${error}` });
-        }
-        break;
-      }
-      case "duplicate-pov-preset": {
-        debug(userId, `ipc in: duplicate-pov-preset id="${msg.id}" slot=${msg.slot}`);
-        try {
-          const copy = await duplicatePovPreset(userId, msg.id);
-          const settingsKey = msg.slot === "input" ? "userPov" : "pov";
-          const updated = await updateSettings(userId, { [settingsKey]: copy.id });
-          send({ type: "settings", settings: updated });
-          send({ type: "pov-presets", presets: await listPovPresets(userId) });
-        } catch (err) {
-          const error = err instanceof Error ? err.message : String(err);
-          spindle.log.warn(`[Hone] duplicate-pov-preset failed: ${error}`);
-          send({ type: "pov-presets", presets: await listPovPresets(userId) });
-          send({ type: "pov-preset-error", error: `Failed to duplicate POV preset: ${error}` });
-        }
-        break;
-      }
-      case "get-debug-logs": {
-        const formatted = formatLogs(userId);
-        const stats = bufferStats(userId);
-        send({
-          type: "debug-logs",
-          formatted,
-          count: stats.count,
-          capacity: stats.capacity,
-          enabled: stats.enabled
-        });
-        break;
-      }
-      case "log": {
-        if (msg.level === "error") {
-          spindle.log.warn(`[Hone][frontend] ERROR ${msg.msg}`);
-        }
-        debug(userId, `[frontend ${msg.level}] ${msg.msg}`);
-        break;
-      }
-      case "clear-debug-logs": {
-        clearLogs(userId);
-        const stats = bufferStats(userId);
-        send({
-          type: "debug-logs",
-          formatted: formatLogs(userId),
-          count: stats.count,
-          capacity: stats.capacity,
-          enabled: stats.enabled
-        });
-        break;
-      }
-    }
-  } catch (err) {
-    const error = err instanceof Error ? err.message : String(err);
-    spindle.log.warn(`IPC handler error (${msg.type}): ${error}`);
-  }
-});
+
+// src/backend/events.ts
 var activeGenerationsByUser = new Map;
-function addActiveGeneration(userId, generationId) {
+function addActiveGeneration(userId, id) {
   let set = activeGenerationsByUser.get(userId);
   if (!set) {
     set = new Set;
     activeGenerationsByUser.set(userId, set);
   }
-  set.add(generationId);
+  set.add(id);
 }
-function removeActiveGeneration(userId, generationId) {
+function removeActiveGeneration(userId, id) {
   const set = activeGenerationsByUser.get(userId);
   if (!set)
     return;
-  set.delete(generationId);
+  set.delete(id);
   if (set.size === 0)
     activeGenerationsByUser.delete(userId);
 }
-function publishGeneratingFor(userId) {
+function publishGeneratingFor(userId, sendTo) {
   const generating = (activeGenerationsByUser.get(userId)?.size ?? 0) > 0;
   sendTo({ type: "generation-state", generating }, userId);
 }
-spindle.on("GENERATION_STARTED", (payload, userId) => {
-  const id = payload?.generationId;
-  if (!id || !userId)
-    return;
-  addActiveGeneration(userId, id);
-  debug(userId, `GENERATION_STARTED ${id} (active=${activeGenerationsByUser.get(userId)?.size ?? 0})`);
-  publishGeneratingFor(userId);
-});
-spindle.on("GENERATION_STOPPED", (payload, userId) => {
-  const id = payload?.generationId;
-  if (!id || !userId)
-    return;
-  removeActiveGeneration(userId, id);
-  debug(userId, `GENERATION_STOPPED ${id} (active=${activeGenerationsByUser.get(userId)?.size ?? 0})`);
-  publishGeneratingFor(userId);
-});
-spindle.on("GENERATION_ENDED", async (payload, userId) => {
-  const id = payload?.generationId;
-  if (!userId)
-    return;
-  if (id)
-    removeActiveGeneration(userId, id);
-  debug(userId, `GENERATION_ENDED ${id} (active=${activeGenerationsByUser.get(userId)?.size ?? 0})`);
-  publishGeneratingFor(userId);
-  const settings = await getSettings(userId);
-  if (!settings.enabled || !settings.autoRefine)
-    return;
-  if (!hasPermission("chat_mutation"))
-    return;
-  const chatId = payload.chatId;
-  const messageId = payload.messageId;
-  if (!chatId || !messageId)
-    return;
-  const send = bindSender(userId);
-  try {
-    const messages = await spindle.chat.getMessages(chatId);
-    const msg = messages.find((m) => m.id === messageId);
-    if (msg?.role !== "assistant")
-      return;
-    debug(userId, `Auto-refine triggered for ${messageId} in chat ${chatId}`);
-    send({ type: "auto-refine-started", messageId });
-    await refineSingle(chatId, messageId, userId, send);
-    send({ type: "auto-refine-complete", messageId, success: true });
-    await sendRefinedStateFor(userId);
-  } catch (err) {
-    const error = err instanceof Error ? err.message : String(err);
-    spindle.log.warn(`Auto-refine failed: ${error}`);
-    send({ type: "auto-refine-complete", messageId, success: false });
-  }
-});
 async function handleSwipeDeletion(userId, chatId, messageId, deletedSwipeId) {
   const stored = await listUndoEntriesForMessage(userId, chatId, messageId);
   if (stored.length === 0)
@@ -6863,24 +5979,702 @@ async function handleSwipeDeletion(userId, chatId, messageId, deletedSwipeId) {
   }
   await replaceUndoFileForMessage(userId, chatId, messageId, next);
 }
-spindle.on("MESSAGE_SWIPED", async (payload, userId) => {
-  const { chatId, message, action, swipeId } = payload;
-  if (!userId)
-    return;
-  debug(userId, `MESSAGE_SWIPED(${action}) chat=${chatId.slice(0, 8)} msg=${message.id.slice(0, 8)} swipeId=${swipeId}`);
-  if (action === "deleted") {
-    await enqueueChatOperation(`${userId}:${chatId}`, () => handleSwipeDeletion(userId, chatId, message.id, swipeId));
+function registerEvents(sendTo) {
+  spindle.on("GENERATION_STARTED", safeEvent("GENERATION_STARTED", async (payload, userId) => {
+    const id = payload.generationId;
+    if (!id)
+      return;
+    addActiveGeneration(userId, id);
+    debug(userId, `GENERATION_STARTED ${id} (active=${activeGenerationsByUser.get(userId)?.size ?? 0})`);
+    publishGeneratingFor(userId, sendTo);
+  }));
+  spindle.on("GENERATION_STOPPED", safeEvent("GENERATION_STOPPED", async (payload, userId) => {
+    const id = payload.generationId;
+    if (!id)
+      return;
+    removeActiveGeneration(userId, id);
+    debug(userId, `GENERATION_STOPPED ${id} (active=${activeGenerationsByUser.get(userId)?.size ?? 0})`);
+    publishGeneratingFor(userId, sendTo);
+  }));
+  spindle.on("GENERATION_ENDED", safeEvent("GENERATION_ENDED", async (payload, userId) => {
+    const id = payload.generationId;
+    if (id)
+      removeActiveGeneration(userId, id);
+    debug(userId, `GENERATION_ENDED ${id} (active=${activeGenerationsByUser.get(userId)?.size ?? 0})`);
+    publishGeneratingFor(userId, sendTo);
+    const settings = await getSettings(userId);
+    if (!settings.enabled || !settings.autoRefine)
+      return;
+    if (!hasPermission("chat_mutation"))
+      return;
+    const chatId = payload.chatId;
+    const messageId = payload.messageId;
+    if (!chatId || !messageId)
+      return;
+    const send = (m) => sendTo(m, userId);
+    const messages = await spindle.chat.getMessages(chatId);
+    const msg = messages.find((m) => m.id === messageId);
+    if (msg?.role !== "assistant")
+      return;
+    debug(userId, `Auto-refine triggered for ${messageId} in chat ${chatId}`);
+    send({ type: "auto-refine-started", messageId });
+    try {
+      await refineSingle(chatId, messageId, userId, send);
+      send({ type: "auto-refine-complete", messageId, success: true });
+      await sendRefinedStateFor(userId, send);
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      spindle.log.warn(`Auto-refine failed: ${error}`);
+      send({ type: "auto-refine-complete", messageId, success: false });
+    }
+  }));
+  spindle.on("MESSAGE_SWIPED", safeEvent("MESSAGE_SWIPED", async (payload, userId) => {
+    const { chatId, message, action, swipeId } = payload;
+    if (!chatId || !message?.id)
+      return;
+    debug(userId, `MESSAGE_SWIPED(${action}) chat=${chatId.slice(0, 8)} msg=${message.id.slice(0, 8)} swipeId=${swipeId}`);
+    if (action === "deleted" && typeof swipeId === "number") {
+      await enqueueChatOperation(`${userId}:${chatId}`, () => handleSwipeDeletion(userId, chatId, message.id, swipeId));
+    }
+    const send = (m) => sendTo(m, userId);
+    await sendRefinedStateFor(userId, send);
+  }));
+  spindle.on("MESSAGE_DELETED", safeEvent("MESSAGE_DELETED", async (payload, userId) => {
+    const { chatId, messageId } = payload;
+    if (!chatId || !messageId)
+      return;
+    debug(userId, `MESSAGE_DELETED chat=${chatId.slice(0, 8)} msg=${messageId.slice(0, 8)}`);
+    await enqueueChatOperation(`${userId}:${chatId}`, () => replaceUndoFileForMessage(userId, chatId, messageId, []));
+    const send = (m) => sendTo(m, userId);
+    await sendRefinedStateFor(userId, send);
+  }));
+}
+
+// src/backend/handlers/refine.ts
+function requirePermission(p, ctx, messageId) {
+  if (hasPermission(p))
+    return true;
+  const err = `Missing '${p}' permission. Grant it in extension settings.`;
+  spindle.log.warn(err);
+  ctx.send({ type: "refine-error", messageId: messageId || "", error: err });
+  return false;
+}
+var refineHandlers = {
+  async refine(msg, ctx) {
+    if (!requirePermission("chat_mutation", ctx, msg.messageId))
+      return;
+    debug(ctx.userId, `Refining message ${msg.messageId} in chat ${msg.chatId}`);
+    await refineSingle(msg.chatId, msg.messageId, ctx.userId, ctx.send);
+    await sendRefinedStateFor(ctx.userId, ctx.send);
+  },
+  async undo(msg, ctx) {
+    if (!requirePermission("chat_mutation", ctx, msg.messageId))
+      return;
+    debug(ctx.userId, `Undoing refinement for ${msg.messageId} in chat ${msg.chatId}`);
+    await undoRefine(msg.chatId, msg.messageId, ctx.userId, ctx.send);
+    await sendRefinedStateFor(ctx.userId, ctx.send);
+  },
+  async "bulk-refine"(msg, ctx) {
+    if (!requirePermission("chat_mutation", ctx))
+      return;
+    debug(ctx.userId, `Bulk refining ${msg.messageIds.length} messages in chat ${msg.chatId}`);
+    await refineBulk(msg.chatId, msg.messageIds, ctx.userId, ctx.send);
+  },
+  async enhance(msg, ctx) {
+    if (!requirePermission("chat_mutation", ctx))
+      return;
+    debug(ctx.userId, `Enhancing user message in chat ${msg.chatId} (mode: ${msg.mode})`);
+    await enhanceUserMessage(msg.text, msg.chatId, ctx.userId, msg.mode, ctx.send);
+  },
+  async "refine-last"(_msg, ctx) {
+    if (!requirePermission("chat_mutation", ctx))
+      return;
+    if (!requirePermission("chats", ctx))
+      return;
+    try {
+      const chatId = await getActiveChatIdFor(ctx.userId);
+      if (!chatId) {
+        ctx.send({ type: "refine-error", messageId: "", error: "No active chat" });
+        return;
+      }
+      const messages = await spindle.chat.getMessages(chatId);
+      const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+      if (!lastAssistant) {
+        ctx.send({ type: "refine-error", messageId: "", error: "No assistant message found in chat" });
+        return;
+      }
+      debug(ctx.userId, `Refine-last: refining ${lastAssistant.id} in chat ${chatId}`);
+      await refineSingle(chatId, lastAssistant.id, ctx.userId, ctx.send);
+      await sendRefinedStateFor(ctx.userId, ctx.send);
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      ctx.send({ type: "refine-error", messageId: "", error });
+    }
+  },
+  async "undo-last"(_msg, ctx) {
+    if (!requirePermission("chat_mutation", ctx))
+      return;
+    if (!requirePermission("chats", ctx))
+      return;
+    try {
+      const chatId = await getActiveChatIdFor(ctx.userId);
+      if (!chatId) {
+        ctx.send({ type: "refine-error", messageId: "", error: "No active chat" });
+        return;
+      }
+      const messages = await spindle.chat.getMessages(chatId);
+      const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+      if (!lastAssistant) {
+        ctx.send({ type: "refine-error", messageId: "", error: "No assistant message in chat" });
+        return;
+      }
+      const entry = await getUndo(ctx.userId, chatId, lastAssistant.id, lastAssistant.swipe_id);
+      if (!entry) {
+        ctx.send({ type: "refine-error", messageId: "", error: "No undo available for the current swipe" });
+        return;
+      }
+      debug(ctx.userId, `Undo-last: undoing ${lastAssistant.id} swipe ${lastAssistant.swipe_id}`);
+      await undoRefine(chatId, lastAssistant.id, ctx.userId, ctx.send);
+      await sendRefinedStateFor(ctx.userId, ctx.send);
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      ctx.send({ type: "refine-error", messageId: "", error });
+    }
+  },
+  async "refine-all"(_msg, ctx) {
+    if (!requirePermission("chat_mutation", ctx))
+      return;
+    if (!requirePermission("chats", ctx))
+      return;
+    try {
+      const chatId = await getActiveChatIdFor(ctx.userId);
+      if (!chatId) {
+        ctx.send({ type: "refine-error", messageId: "", error: "No active chat" });
+        return;
+      }
+      const messages = await spindle.chat.getMessages(chatId);
+      const assistantIds = messages.filter((m) => m.role === "assistant").map((m) => m.id);
+      if (assistantIds.length === 0) {
+        ctx.send({ type: "refine-error", messageId: "", error: "No assistant messages in chat" });
+        return;
+      }
+      debug(ctx.userId, `Refine-all: refining ${assistantIds.length} assistant messages in chat ${chatId}`);
+      await refineBulk(chatId, assistantIds, ctx.userId, ctx.send);
+      await sendRefinedStateFor(ctx.userId, ctx.send);
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      ctx.send({ type: "refine-error", messageId: "", error });
+    }
+  },
+  async "use-stage-version"(msg, ctx) {
+    if (!requirePermission("chat_mutation", ctx))
+      return;
+    await enqueueChatOperation(`${ctx.userId}:${msg.chatId}`, async () => {
+      try {
+        const currentMsg = (await spindle.chat.getMessages(msg.chatId)).find((m) => m.id === msg.messageId);
+        if (!currentMsg) {
+          ctx.send({ type: "refine-error", messageId: msg.messageId, error: "Message not found" });
+          return;
+        }
+        const swipeId = currentMsg.swipe_id;
+        const existingEntry = await getUndo(ctx.userId, msg.chatId, msg.messageId, swipeId);
+        if (!existingEntry) {
+          ctx.send({ type: "refine-error", messageId: msg.messageId, error: "No active refinement on this swipe" });
+          return;
+        }
+        if (!existingEntry.stages || existingEntry.stages.length === 0) {
+          ctx.send({
+            type: "refine-error",
+            messageId: msg.messageId,
+            error: "This refinement has no pipeline stages to pick from"
+          });
+          return;
+        }
+        const stage = existingEntry.stages.find((s) => s.index === msg.stageIndex && s.kind === msg.stageKind);
+        if (!stage) {
+          ctx.send({
+            type: "refine-error",
+            messageId: msg.messageId,
+            error: `Stage ${msg.stageKind}[${msg.stageIndex}] not found`
+          });
+          return;
+        }
+        const updatedEntry = {
+          ...existingEntry,
+          refinedContent: stage.text,
+          strategy: `stage-${stage.name}`,
+          timestamp: Date.now()
+        };
+        await saveUndo(ctx.userId, msg.chatId, msg.messageId, swipeId, updatedEntry);
+        try {
+          await spindle.chat.updateMessage(msg.chatId, msg.messageId, {
+            content: stage.text,
+            metadata: { ...currentMsg.metadata || {}, hone_refined: true }
+          });
+        } catch (updateErr) {
+          const updateError = updateErr instanceof Error ? updateErr.message : String(updateErr);
+          spindle.log.warn(`[Hone] rollback: use-stage-version updateMessage failed for ${msg.messageId} swipe ${swipeId}: ${updateError}; restoring prior undo entry`);
+          try {
+            await saveUndo(ctx.userId, msg.chatId, msg.messageId, swipeId, existingEntry);
+            spindle.log.warn(`[Hone] rollback: prior undo entry restored for ${msg.messageId} swipe ${swipeId}`);
+          } catch (rollbackErr) {
+            const rollbackError = rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr);
+            spindle.log.error(`[Hone] rollback FAILED for ${msg.messageId} swipe ${swipeId}: ${rollbackError}. Undo entry now points at a stage that was not applied; next refine/undo of this swipe will reconcile`);
+          }
+          throw updateErr;
+        }
+        ctx.send({ type: "diff", original: existingEntry.originalContent, refined: stage.text });
+        ctx.send({ type: "refine-complete", messageId: msg.messageId, success: true });
+        await sendRefinedStateFor(ctx.userId, ctx.send);
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+        ctx.send({ type: "refine-error", messageId: msg.messageId, error });
+      }
+    });
+  },
+  async "view-diff"(msg, ctx) {
+    if (!requirePermission("chats", ctx, msg.messageId))
+      return;
+    try {
+      const messages = await spindle.chat.getMessages(msg.chatId);
+      const targetMsg = messages.find((m) => m.id === msg.messageId);
+      if (!targetMsg) {
+        ctx.send({ type: "refine-error", messageId: msg.messageId, error: "Message not found" });
+        return;
+      }
+      const entry = await getUndo(ctx.userId, msg.chatId, msg.messageId, targetMsg.swipe_id);
+      if (entry) {
+        ctx.send({ type: "diff", original: entry.originalContent, refined: entry.refinedContent });
+      } else {
+        ctx.send({ type: "refine-error", messageId: msg.messageId, error: "No diff data found for this swipe" });
+      }
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      debug(ctx.userId, `ipc view-diff: FAILED: ${error}`);
+      ctx.send({ type: "refine-error", messageId: msg.messageId, error });
+    }
   }
-  await sendRefinedStateFor(userId);
-});
-spindle.on("MESSAGE_DELETED", async (payload, userId) => {
-  const { chatId, messageId } = payload || {};
-  if (!userId || !chatId || !messageId)
+};
+
+// src/backend/handlers/presets.ts
+async function pushPresets(userId, send) {
+  const presets = await listPresets(userId);
+  const settings = await getSettings(userId);
+  send({
+    type: "presets",
+    presets,
+    activeId: settings.currentPresetId,
+    activeInputId: settings.currentInputPresetId
+  });
+}
+var presetHandlers = {
+  async "list-presets"(_msg, ctx) {
+    debug(ctx.userId, `ipc list-presets: fetching`);
+    await pushPresets(ctx.userId, ctx.send);
+  },
+  async "get-preset"(msg, ctx) {
+    debug(ctx.userId, `ipc get-preset: id="${msg.id}"`);
+    const preset = await getPreset(ctx.userId, msg.id);
+    if (!preset) {
+      debug(ctx.userId, `ipc get-preset: "${msg.id}" not found, falling back`);
+      await pushPresets(ctx.userId, ctx.send);
+      return;
+    }
+    ctx.send({ type: "preset", preset });
+  },
+  async "save-preset"(msg, ctx) {
+    debug(ctx.userId, `ipc save-preset: id="${msg.preset.id}" name="${msg.preset.name}"`);
+    try {
+      await savePreset(ctx.userId, msg.preset);
+      await pushPresets(ctx.userId, ctx.send);
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      spindle.log.warn(`[Hone] save-preset failed: ${error}`);
+      ctx.send({ type: "preset-import-result", success: false, error });
+    }
+  },
+  async "delete-preset"(msg, ctx) {
+    debug(ctx.userId, `ipc delete-preset: id="${msg.id}"`);
+    try {
+      await deletePreset(ctx.userId, msg.id);
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      spindle.log.warn(`[Hone] delete-preset failed: ${error}`);
+      ctx.send({ type: "refine-error", messageId: "", error: `Failed to delete preset: ${error}` });
+      await pushPresets(ctx.userId, ctx.send);
+      return;
+    }
+    const settings = await getSettings(ctx.userId);
+    const fallbacks = {};
+    if (settings.currentPresetId === msg.id)
+      fallbacks.currentPresetId = DEFAULT_ACTIVE_PRESET_ID;
+    if (settings.currentInputPresetId === msg.id)
+      fallbacks.currentInputPresetId = DEFAULT_INPUT_ACTIVE_PRESET_ID;
+    if (Object.keys(fallbacks).length > 0)
+      await updateSettings(ctx.userId, fallbacks);
+    await pushPresets(ctx.userId, ctx.send);
+  },
+  async "duplicate-preset"(msg, ctx) {
+    debug(ctx.userId, `ipc duplicate-preset: source="${msg.id}" slot=${msg.slot}`);
+    try {
+      const copy = await duplicatePreset(ctx.userId, msg.id);
+      const settingsKey = msg.slot === "input" ? "currentInputPresetId" : "currentPresetId";
+      await updateSettings(ctx.userId, { [settingsKey]: copy.id });
+      await pushPresets(ctx.userId, ctx.send);
+      ctx.send({ type: "preset", preset: copy });
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      spindle.log.warn(`[Hone] duplicate-preset failed: ${error}`);
+      ctx.send({ type: "preset-import-result", success: false, error });
+    }
+  },
+  async "set-active-preset"(msg, ctx) {
+    debug(ctx.userId, `ipc set-active-preset: id="${msg.id}" slot=${msg.slot}`);
+    const preset = await getPreset(ctx.userId, msg.id);
+    if (!preset) {
+      spindle.log.warn(`[Hone] set-active-preset: preset "${msg.id}" not found`);
+      return;
+    }
+    const settingsKey = msg.slot === "input" ? "currentInputPresetId" : "currentPresetId";
+    await updateSettings(ctx.userId, { [settingsKey]: msg.id });
+    await pushPresets(ctx.userId, ctx.send);
+    ctx.send({ type: "preset", preset });
+  },
+  async "export-preset"(msg, ctx) {
+    debug(ctx.userId, `ipc export-preset: id="${msg.id}"`);
+    try {
+      const exported = await exportPreset(ctx.userId, msg.id);
+      ctx.send({
+        type: "preset-exported",
+        id: exported.id,
+        name: exported.name,
+        json: exported.json
+      });
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      spindle.log.warn(`[Hone] export-preset failed: ${error}`);
+      ctx.send({ type: "preset-import-result", success: false, error });
+    }
+  },
+  async "import-preset"(msg, ctx) {
+    debug(ctx.userId, `ipc import-preset: ${msg.json.length} chars slot=${msg.slot}`);
+    try {
+      const imported = await importPreset(ctx.userId, msg.json, msg.slot);
+      const settingsKey = msg.slot === "input" ? "currentInputPresetId" : "currentPresetId";
+      await updateSettings(ctx.userId, { [settingsKey]: imported.id });
+      await pushPresets(ctx.userId, ctx.send);
+      ctx.send({ type: "preset", preset: imported });
+      ctx.send({ type: "preset-import-result", success: true, id: imported.id });
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      spindle.log.warn(`[Hone] import-preset failed: ${error}`);
+      ctx.send({ type: "preset-import-result", success: false, error });
+    }
+  },
+  async "preview-stage"(msg, ctx) {
+    const previewChatId = msg.chatId || await getActiveChatIdFor(ctx.userId) || undefined;
+    debug(ctx.userId, `ipc preview-stage: slot=${msg.slot} path=${JSON.stringify(msg.path)} stageIndex=${msg.stageIndex} chatId=${previewChatId?.slice(0, 8) || "none"}`);
+    try {
+      const settings = await getSettings(ctx.userId);
+      const presetId = msg.slot === "input" ? settings.currentInputPresetId : settings.currentPresetId;
+      const preset = await getPreset(ctx.userId, presetId);
+      if (!preset) {
+        spindle.log.warn(`[Hone] preview-stage: no active ${msg.slot} preset`);
+        return;
+      }
+      const pipeline = msg.path.kind === "pipeline" ? preset.pipeline : msg.path.kind === "proposal" ? preset.parallel?.proposals[msg.path.proposalIndex] : preset.parallel?.aggregator;
+      if (!pipeline) {
+        spindle.log.warn(`[Hone] preview-stage: pipeline not found for path ${JSON.stringify(msg.path)}`);
+        return;
+      }
+      const stage = pipeline.stages[msg.stageIndex];
+      if (!stage) {
+        spindle.log.warn(`[Hone] preview-stage: stage ${msg.stageIndex} not found`);
+        return;
+      }
+      const proposals = msg.path.kind === "aggregator" && preset.parallel ? preset.parallel.proposals.map((_, i) => `<proposal ${i + 1} output: placeholder since no LLM was called for the preview>`) : undefined;
+      const result = await previewStage(preset, stage, msg.stageIndex, pipeline.stages.length, ctx.userId, proposals, previewChatId, msg.slot);
+      ctx.send({
+        type: "preview-result",
+        path: msg.path,
+        stageIndex: msg.stageIndex,
+        messages: result.messages,
+        diagnostics: result.diagnostics
+      });
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      debug(ctx.userId, `ipc preview-stage: FAILED: ${error}`);
+      spindle.log.warn(`[Hone] preview-stage failed: ${error}`);
+    }
+  }
+};
+
+// src/backend/handlers/profiles.ts
+var profileHandlers = {
+  async "list-model-profiles"(_msg, ctx) {
+    debug(ctx.userId, `ipc in: list-model-profiles`);
+    const profiles = await listModelProfiles(ctx.userId);
+    ctx.send({ type: "model-profiles", profiles });
+  },
+  async "get-model-profile"(msg, ctx) {
+    debug(ctx.userId, `ipc in: get-model-profile`);
+    if (msg.id === DEFAULT_PROFILE_ID) {
+      ctx.send({ type: "model-profile", profile: getDefaultProfile() });
+      return;
+    }
+    const profile = await getModelProfile(ctx.userId, msg.id);
+    if (profile) {
+      ctx.send({ type: "model-profile", profile });
+      return;
+    }
+    debug(ctx.userId, `ipc get-model-profile: "${msg.id}" not found, falling back to default`);
+    ctx.send({ type: "model-profile", profile: getDefaultProfile() });
+    const settings = await getSettings(ctx.userId);
+    if (settings.activeModelProfileId === msg.id) {
+      await updateSettings(ctx.userId, { activeModelProfileId: "" });
+      ctx.send({ type: "settings", settings: { ...settings, activeModelProfileId: "" } });
+    }
+  },
+  async "create-model-profile"(msg, ctx) {
+    debug(ctx.userId, `ipc in: create-model-profile`);
+    const profile = await createModelProfile(ctx.userId, msg.connectionProfileId, msg.name);
+    ctx.send({ type: "model-profile", profile });
+    await updateSettings(ctx.userId, { activeModelProfileId: profile.id });
+    const updatedSettings = await getSettings(ctx.userId);
+    ctx.send({ type: "settings", settings: updatedSettings });
+    ctx.send({ type: "model-profiles", profiles: await listModelProfiles(ctx.userId) });
+  },
+  async "save-model-profile"(msg, ctx) {
+    debug(ctx.userId, `ipc in: save-model-profile`);
+    await saveModelProfile(ctx.userId, msg.profile);
+    ctx.send({ type: "model-profile", profile: msg.profile });
+    ctx.send({ type: "model-profiles", profiles: await listModelProfiles(ctx.userId) });
+  },
+  async "delete-model-profile"(msg, ctx) {
+    debug(ctx.userId, `ipc in: delete-model-profile`);
+    await deleteModelProfile(ctx.userId, msg.id);
+    const settings = await getSettings(ctx.userId);
+    if (settings.activeModelProfileId === msg.id) {
+      await updateSettings(ctx.userId, { activeModelProfileId: "" });
+      const updatedSettings = await getSettings(ctx.userId);
+      ctx.send({ type: "settings", settings: updatedSettings });
+    }
+    ctx.send({ type: "model-profiles", profiles: await listModelProfiles(ctx.userId) });
+  },
+  async "duplicate-model-profile"(msg, ctx) {
+    debug(ctx.userId, `ipc in: duplicate-model-profile`);
+    const dup = msg.id === DEFAULT_PROFILE_ID ? await createModelProfile(ctx.userId, "", "New Profile") : await duplicateModelProfile(ctx.userId, msg.id);
+    if (!dup) {
+      debug(ctx.userId, `ipc duplicate-model-profile: source "${msg.id}" not found`);
+      return;
+    }
+    await updateSettings(ctx.userId, { activeModelProfileId: dup.id });
+    const updatedSettings = await getSettings(ctx.userId);
+    ctx.send({ type: "settings", settings: updatedSettings });
+    ctx.send({ type: "model-profile", profile: dup });
+    ctx.send({ type: "model-profiles", profiles: await listModelProfiles(ctx.userId) });
+  }
+};
+
+// src/backend/handlers/pov.ts
+var povHandlers = {
+  async "list-pov-presets"(_msg, ctx) {
+    debug(ctx.userId, `ipc in: list-pov-presets`);
+    ctx.send({ type: "pov-presets", presets: await listPovPresets(ctx.userId) });
+  },
+  async "save-pov-preset"(msg, ctx) {
+    debug(ctx.userId, `ipc in: save-pov-preset id="${msg.preset.id}"`);
+    try {
+      if (isBuiltInPovPresetId(msg.preset.id)) {
+        throw new Error(`Cannot save over built-in POV preset "${msg.preset.id}"; duplicate it first.`);
+      }
+      await savePovPreset(ctx.userId, msg.preset);
+      ctx.send({ type: "pov-presets", presets: await listPovPresets(ctx.userId) });
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      spindle.log.warn(`[Hone] save-pov-preset failed: ${error}`);
+      ctx.send({ type: "pov-presets", presets: await listPovPresets(ctx.userId) });
+      ctx.send({ type: "pov-preset-error", error: `Failed to save POV preset: ${error}` });
+    }
+  },
+  async "delete-pov-preset"(msg, ctx) {
+    debug(ctx.userId, `ipc in: delete-pov-preset id="${msg.id}"`);
+    try {
+      if (isBuiltInPovPresetId(msg.id)) {
+        throw new Error(`Cannot delete built-in POV preset "${msg.id}".`);
+      }
+      await deletePovPreset(ctx.userId, msg.id);
+      const settings = await getSettings(ctx.userId);
+      const patch = {};
+      if (settings.pov === msg.id)
+        patch.pov = DEFAULT_POV_PRESET_ID;
+      if (settings.userPov === msg.id)
+        patch.userPov = DEFAULT_USER_POV_PRESET_ID;
+      if (Object.keys(patch).length > 0) {
+        const updated = await updateSettings(ctx.userId, patch);
+        ctx.send({ type: "settings", settings: updated });
+      }
+      ctx.send({ type: "pov-presets", presets: await listPovPresets(ctx.userId) });
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      spindle.log.warn(`[Hone] delete-pov-preset failed: ${error}`);
+      ctx.send({ type: "pov-presets", presets: await listPovPresets(ctx.userId) });
+      ctx.send({ type: "pov-preset-error", error: `Failed to delete POV preset: ${error}` });
+    }
+  },
+  async "duplicate-pov-preset"(msg, ctx) {
+    debug(ctx.userId, `ipc in: duplicate-pov-preset id="${msg.id}" slot=${msg.slot}`);
+    try {
+      const copy = await duplicatePovPreset(ctx.userId, msg.id);
+      const settingsKey = msg.slot === "input" ? "userPov" : "pov";
+      const updated = await updateSettings(ctx.userId, { [settingsKey]: copy.id });
+      ctx.send({ type: "settings", settings: updated });
+      ctx.send({ type: "pov-presets", presets: await listPovPresets(ctx.userId) });
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      spindle.log.warn(`[Hone] duplicate-pov-preset failed: ${error}`);
+      ctx.send({ type: "pov-presets", presets: await listPovPresets(ctx.userId) });
+      ctx.send({ type: "pov-preset-error", error: `Failed to duplicate POV preset: ${error}` });
+    }
+  }
+};
+
+// src/backend/handlers/settings.ts
+var settingsHandlers = {
+  async "get-settings"(_msg, ctx) {
+    const settings = await getSettings(ctx.userId);
+    ctx.send({ type: "settings", settings });
+  },
+  async "update-settings"(msg, ctx) {
+    const updated = await updateSettings(ctx.userId, msg.settings);
+    ctx.send({ type: "settings", settings: updated });
+    if ("debugLogging" in msg.settings || "debugLogMaxEntries" in msg.settings) {
+      const stats = bufferStats(ctx.userId);
+      ctx.send({
+        type: "debug-logs",
+        formatted: formatLogs(ctx.userId),
+        count: stats.count,
+        capacity: stats.capacity,
+        enabled: stats.enabled
+      });
+    }
+  },
+  async "get-stats"(msg, ctx) {
+    if (!hasPermission("chats"))
+      return;
+    const stats = await getStats(ctx.userId, msg.chatId);
+    ctx.send({ type: "stats", stats });
+  },
+  async "get-connections"(_msg, ctx) {
+    if (!hasPermission("generation"))
+      return;
+    try {
+      const conns = await spindle.connections.list(ctx.userId);
+      ctx.send({
+        type: "connections",
+        connections: (conns ?? []).map((c) => ({
+          id: c.id,
+          name: c.name,
+          provider: c.provider || "",
+          model: c.model || "",
+          is_default: !!c.is_default,
+          has_api_key: !!c.has_api_key
+        }))
+      });
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      spindle.log.warn(`get-connections failed: ${error}`);
+      ctx.send({ type: "connections", connections: [], error });
+    }
+  },
+  async "get-active-chat"(_msg, ctx) {
+    const chatId = await getActiveChatIdFor(ctx.userId);
+    debug(ctx.userId, `Active chat: ${chatId || "none"}`);
+    if (!chatId) {
+      ctx.send({
+        type: "active-chat",
+        chatId: null,
+        lastMessageRefined: false,
+        lastAiMessageId: null,
+        refinedMessageIds: []
+      });
+      return;
+    }
+    const snap = await snapshotLastAiState(ctx.userId, chatId);
+    ctx.send({
+      type: "active-chat",
+      chatId,
+      lastMessageRefined: snap.refined,
+      lastAiMessageId: snap.messageId,
+      lastAiStages: snap.stages,
+      refinedMessageIds: snap.refinedMessageIds
+    });
+  }
+};
+
+// src/backend/handlers/debug.ts
+var debugHandlers = {
+  async "get-debug-logs"(_msg, ctx) {
+    const formatted = formatLogs(ctx.userId);
+    const stats = bufferStats(ctx.userId);
+    ctx.send({
+      type: "debug-logs",
+      formatted,
+      count: stats.count,
+      capacity: stats.capacity,
+      enabled: stats.enabled
+    });
+  },
+  async "clear-debug-logs"(_msg, ctx) {
+    clearLogs(ctx.userId);
+    const stats = bufferStats(ctx.userId);
+    ctx.send({
+      type: "debug-logs",
+      formatted: formatLogs(ctx.userId),
+      count: stats.count,
+      capacity: stats.capacity,
+      enabled: stats.enabled
+    });
+  },
+  async log(msg, ctx) {
+    if (msg.level === "error") {
+      spindle.log.warn(`[Hone][frontend] ERROR ${msg.msg}`);
+    }
+    debug(ctx.userId, `[frontend ${msg.level}] ${msg.msg}`);
+  }
+};
+
+// src/backend/index.ts
+function sendTo(msg, userId) {
+  spindle.sendToFrontend(msg, userId);
+}
+var allHandlers = {
+  ...refineHandlers,
+  ...presetHandlers,
+  ...profileHandlers,
+  ...povHandlers,
+  ...settingsHandlers,
+  ...debugHandlers
+};
+var dispatch = createDispatcher(allHandlers);
+spindle.onFrontendMessage(async (raw, userId) => {
+  const msg = validateIpcMessage(raw);
+  if (!msg) {
+    spindle.log.warn("Received invalid IPC message (missing type)");
     return;
-  debug(userId, `MESSAGE_DELETED chat=${chatId.slice(0, 8)} msg=${messageId.slice(0, 8)}`);
-  await enqueueChatOperation(`${userId}:${chatId}`, () => replaceUndoFileForMessage(userId, chatId, messageId, []));
-  await sendRefinedStateFor(userId);
+  }
+  debug(userId, `ipc in: ${msg.type}${"chatId" in msg && typeof msg.chatId === "string" ? ` chatId=${msg.chatId.slice(0, 8)}` : ""}${"messageId" in msg && typeof msg.messageId === "string" ? ` msgId=${msg.messageId.slice(0, 8)}` : ""}`);
+  try {
+    await dispatch(msg, {
+      userId,
+      send: (m) => sendTo(m, userId)
+    });
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    spindle.log.warn(`IPC handler error (${msg.type}): ${error}`);
+  }
 });
+registerEvents(sendTo);
 async function init() {
   await initPermissions();
   spindle.log.info("Hone extension loaded");
