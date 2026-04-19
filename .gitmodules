@@ -1,0 +1,3 @@
+[submodule "tests/playwright"]
+	path = tests/playwright
+	url = git@github-mousepad:AMousePad/Hone-tests.git

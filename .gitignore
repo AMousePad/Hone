@@ -12,6 +12,11 @@ tmp/
 local_tests/
 vendor/
 
+# Playwright run artifacts (results, auth state, traces)
+tests/playwright/test-results/
+tests/playwright/.auth/
+tests/playwright/playwright-report/
+
 # Logs
 *.log
 

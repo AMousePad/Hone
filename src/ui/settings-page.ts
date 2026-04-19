@@ -78,14 +78,34 @@ export function createSettingsPage(
       )
     );
     section.appendChild(
-      makeNumberRow(
-        "Request Timeout (seconds)",
-        "Maximum seconds to wait for each LLM response.",
-        () => s.generationTimeoutSecs,
-        (val) => sendUpdate({ generationTimeoutSecs: val }),
-        30, 600
+      makeToggleRow(
+        "Stream Generations",
+        "Request the LLM in streaming mode so the backend can detect a stalled upstream within the time-to-first-token window. When off, falls back to a single-shot request capped at the wall-clock timeout below. Some providers behave differently with streaming on. Turn off only if you observe issues.",
+        () => s.streamGenerations,
+        (val) => { sendUpdate({ streamGenerations: val }); render(); }
       )
     );
+    if (s.streamGenerations) {
+      section.appendChild(
+        makeNumberRow(
+          "Time-to-first-token Timeout (seconds)",
+          "Aborts the request if the upstream emits no token within this window. Once the first token arrives, the cap is disarmed and the response runs to completion. Default 480 seconds.",
+          () => s.ttftTimeoutSecs,
+          (val) => sendUpdate({ ttftTimeoutSecs: val }),
+          5, 1800
+        )
+      );
+    } else {
+      section.appendChild(
+        makeNumberRow(
+          "Request Timeout (seconds)",
+          "Non-streaming wall-clock cap. Aborts the request if no response arrives within this window. Default 900 seconds.",
+          () => s.totalTimeoutSecs,
+          (val) => sendUpdate({ totalTimeoutSecs: val }),
+          30, 3600
+        )
+      );
+    }
     section.appendChild(
       makeToggleRow(
         "Play Sound on Refinement Complete",

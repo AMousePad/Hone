@@ -6,6 +6,7 @@ import type {
   PovPresetSummary,
   PresetSlot,
 } from "../../types";
+import { showInlineNotice } from "../forms";
 
 export interface PovEditorOptions {
   ctx: SpindleFrontendContext;
@@ -168,6 +169,11 @@ export function createPovEditor(opts: PovEditorOptions): PovEditorHandle {
     textarea.title = active.builtIn
       ? "Built-in POV presets are read-only. Duplicate to edit."
       : "Edits save when you click away.";
+    if (active.builtIn) {
+      textarea.addEventListener("click", () => {
+        showInlineNotice(root, "Duplicate to edit.");
+      });
+    }
     textarea.addEventListener("change", () => {
       const current = presets?.find((p) => p.id === active.id);
       if (!current || current.builtIn) return;

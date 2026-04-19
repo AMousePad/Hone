@@ -71,17 +71,10 @@ button[data-hone-input-btn].hone-input-btn--enhancing .hone-icon--spinner {
 }
 `;
 
-/** Stable seam: a native-API implementation exposes the same shape. */
 export interface InputAreaInjector {
-  /** Mirrors `settings.userEnhanceEnabled`. */
   setEnabled(enabled: boolean): void;
-  /** Disable while chat-wide generation is streaming. Distinct from
-   *  our internal enhance-in-flight state. */
   setBusy(busy: boolean): void;
-  /** Apply the backend's refined text, stash the pre-Hone draft for
-   *  frontend-only undo, flip to "Undo" state. */
-  onEnhanceResult(text: string): void;
-  /** Clear the spinner, restore idle state. */
+  onEnhanceResult(text: string, requestId: number): void;
   onEnhanceError(): void;
   rescan(): void;
   destroy(): void;
@@ -94,21 +87,12 @@ export function createInputAreaInjector(
   isReady: () => boolean
 ): InputAreaInjector {
   let enabled = true;
-  /** Chat-wide generation streaming. Distinct from `enhanceBusy`. */
   let chatBusy = false;
-  /** Our enhance request is in flight. Click = cancel (frontend-side;
-   *  backend has no cancel IPC; we discard the result). */
   let enhanceBusy = false;
-  /** Counter of enhance results to discard on arrival. Handles
-   *  cancel-then-rehone: backend processes serially, so the first
-   *  post-cancel result belongs to the cancelled request. */
-  let resultsToDiscard = 0;
-  /** Pre-Hone text for frontend-only undo. Cleared on user edit,
-   *  undo, fresh hone overwrite, or cancel. */
   let savedOriginal: string | null = null;
-  /** Most recently written enhanced text. Divergence means the user
-   *  edited after the hone; undo state becomes stale. */
   let savedEnhanced: string | null = null;
+  let nextRequestId = 0;
+  let activeRequestId = 0;
 
   const removeStyle = ctx.dom.addStyle(INJECTOR_STYLES);
 
@@ -270,19 +254,18 @@ export function createInputAreaInjector(
     savedOriginal = currentText;
     savedEnhanced = null;
     enhanceBusy = true;
-    sendToBackend({ type: "enhance", text: currentText, chatId, mode: "pre" });
+    activeRequestId = ++nextRequestId;
+    sendToBackend({ type: "enhance", text: currentText, chatId, mode: "pre", requestId: activeRequestId });
     updateAllButtonStates();
   }
 
   function cancelEnhance() {
     if (!enhanceBusy) return;
-    // Backend has no cancel IPC; request completes server-side and
-    // we discard the result on arrival. Counter handles cancel-
-    // then-rehone: each cancel +1, each result -1.
-    resultsToDiscard++;
+    const chatId = getActiveChatId();
     enhanceBusy = false;
     savedOriginal = null;
     savedEnhanced = null;
+    if (chatId) sendToBackend({ type: "cancel-enhance", chatId });
     updateAllButtonStates();
   }
 
@@ -385,21 +368,9 @@ export function createInputAreaInjector(
       chatBusy = value;
       updateAllButtonStates();
     },
-    onEnhanceResult(text) {
-      if (resultsToDiscard > 0) {
-        resultsToDiscard--;
-        return;
-      }
-      if (!enhanceBusy) {
-        // Shouldn't happen; loud-fail so we notice.
-        flog.error(
-          "onEnhanceResult: result arrived but enhanceBusy=false and resultsToDiscard=0; unexpected. Applying anyway."
-        );
-      }
+    onEnhanceResult(text, requestId) {
+      if (requestId !== activeRequestId) return;
       if (savedOriginal === null) {
-        flog.error(
-          "onEnhanceResult: result arrived but savedOriginal is null; cannot apply (no undo target). Dropping."
-        );
         enhanceBusy = false;
         updateAllButtonStates();
         return;

@@ -203,9 +203,9 @@ export function createMessageActionInjector(
   function updateButtonState(messageId: string) {
     const refined = refinedIds.has(messageId);
     const busy = busyIds.has(messageId);
-    const disabled = busy || !isReady();
+    const disabled = !isReady();
     const title = busy
-      ? "Honing..."
+      ? "Honing... (click to cancel)"
       : refined
       ? "Undo Hone refinement"
       : "Hone this message";
@@ -229,10 +229,14 @@ export function createMessageActionInjector(
 
   function handleClick(messageId: string) {
     if (!isReady()) return;
-    if (busyIds.has(messageId)) return;
 
     const chatId = getActiveChatId();
     if (!chatId) return;
+
+    if (busyIds.has(messageId)) {
+      sendToBackend({ type: "cancel-refine", chatId, messageId });
+      return;
+    }
 
     const wantUndo = refinedIds.has(messageId);
     busyIds.add(messageId);

@@ -7,6 +7,7 @@ import { hasPermission } from "../permissions";
 import { getActiveChatIdFor, sendRefinedStateFor } from "../chat-state";
 import { getUndo, saveUndo } from "../../storage/undo";
 import { enqueueChatOperation } from "../../mutation/queue";
+import * as cancelRegistry from "../../generation/cancel";
 import * as hlog from "../../hlog";
 
 function requirePermission(p: string, ctx: IpcCtx, messageId?: string): boolean {
@@ -41,7 +42,7 @@ export const refineHandlers: HandlerMap = {
   async enhance(msg, ctx) {
     if (!requirePermission("chat_mutation", ctx)) return;
     hlog.debug(ctx.userId, `Enhancing user message in chat ${msg.chatId} (mode: ${msg.mode})`);
-    await enhanceUserMessage(msg.text, msg.chatId, ctx.userId, msg.mode, ctx.send);
+    await enhanceUserMessage(msg.text, msg.chatId, ctx.userId, msg.mode, msg.requestId, ctx.send);
   },
 
   async "refine-last"(_msg, ctx) {
@@ -194,6 +195,34 @@ export const refineHandlers: HandlerMap = {
         ctx.send({ type: "refine-error", messageId: msg.messageId, error });
       }
     });
+  },
+
+  async "cancel-refine"(msg, ctx) {
+    const key = cancelRegistry.refineKey(ctx.userId, msg.chatId, msg.messageId);
+    const found = cancelRegistry.cancel(key);
+    hlog.debug(ctx.userId, `cancel-refine ${msg.messageId.slice(0, 8)}: ${found ? "aborted" : "no in-flight"}`);
+  },
+
+  async "cancel-enhance"(msg, ctx) {
+    const key = cancelRegistry.enhanceKey(ctx.userId, msg.chatId);
+    const found = cancelRegistry.cancel(key);
+    hlog.debug(ctx.userId, `cancel-enhance chat=${msg.chatId.slice(0, 8)}: ${found ? "aborted" : "no in-flight"}`);
+  },
+
+  async "cancel-bulk"(msg, ctx) {
+    const key = cancelRegistry.bulkKey(ctx.userId, msg.chatId);
+    const found = cancelRegistry.cancel(key);
+    hlog.debug(ctx.userId, `cancel-bulk chat=${msg.chatId.slice(0, 8)}: ${found ? "aborted" : "no in-flight"}`);
+  },
+
+  async "cancel-active"(_msg, ctx) {
+    const chatId = await getActiveChatIdFor(ctx.userId);
+    if (!chatId) {
+      hlog.debug(ctx.userId, `cancel-active: no active chat`);
+      return;
+    }
+    const n = cancelRegistry.cancelAllForChat(ctx.userId, chatId);
+    hlog.debug(ctx.userId, `cancel-active chat=${chatId.slice(0, 8)}: cancelled ${n} op(s)`);
   },
 
   async "view-diff"(msg, ctx) {

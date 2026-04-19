@@ -1,6 +1,6 @@
 {
   "name": "hone-lumiverse",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "private": true,
   "scripts": {
     "gen:assets": "bun scripts/gen-asset-modules.ts",
@@ -8,10 +8,16 @@
     "build:frontend": "bun run gen:assets && bun build src/ui/index.ts --outfile dist/frontend.js --target browser",
     "build": "bun run typecheck && bun run build:backend && bun run build:frontend",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --dir local_tests"
+    "test": "vitest run --dir local_tests",
+    "test:e2e": "playwright test --config tests/playwright/playwright.config.ts",
+    "test:e2e:ui": "playwright test --config tests/playwright/playwright.config.ts --ui",
+    "test:e2e:headed": "playwright test --config tests/playwright/playwright.config.ts --headed"
   },
   "devDependencies": {
-    "lumiverse-spindle-types": "0.4.20",
+    "@playwright/test": "^1.47.0",
+    "@types/node": "^22.5.0",
+    "dotenv": "^16.4.5",
+    "lumiverse-spindle-types": "^0.4.24",
     "typescript": "^6.0.2",
     "vitest": "^3.0.0"
   }

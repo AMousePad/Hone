@@ -32,7 +32,9 @@ export interface HoneSettings {
    *  0 = unlimited. */
   maxMessageContextTokens: number;
 
-  generationTimeoutSecs: number;
+  streamGenerations: boolean;
+  ttftTimeoutSecs: number;
+  totalTimeoutSecs: number;
   minCharThreshold: number;
 
   batchIntervalMs: number;
@@ -49,6 +51,8 @@ export interface HoneSettings {
   /** Render the chibi artwork. When false, falls back to the classic
    *  icon pill. */
   floatWidgetLumiaMode: boolean;
+  floatWidgetX: number | null;
+  floatWidgetY: number | null;
 
   /** Per-user in-memory debug logging. See hlog.ts. */
   debugLogging: boolean;
@@ -194,7 +198,7 @@ export type FrontendToBackend =
   | { type: "refine"; messageId: string; chatId: string }
   | { type: "undo"; messageId: string; chatId: string }
   | { type: "bulk-refine"; messageIds: string[]; chatId: string }
-  | { type: "enhance"; text: string; chatId: string; mode: EnhanceMode }
+  | { type: "enhance"; text: string; chatId: string; mode: EnhanceMode; requestId: number }
   | { type: "get-settings" }
   | { type: "update-settings"; settings: Partial<HoneSettings> }
   | { type: "get-stats"; chatId: string }
@@ -231,6 +235,10 @@ export type FrontendToBackend =
   | { type: "refine-last" }
   | { type: "undo-last" }
   | { type: "refine-all" }
+  | { type: "cancel-refine"; chatId: string; messageId: string }
+  | { type: "cancel-enhance"; chatId: string }
+  | { type: "cancel-bulk"; chatId: string }
+  | { type: "cancel-active" }
   | { type: "use-stage-version"; chatId: string; messageId: string; stageIndex: number; stageKind: StageKind }
   | { type: "get-active-chat" }
   | { type: "get-debug-logs" }
@@ -250,7 +258,7 @@ export type BackendToFrontend =
   | { type: "bulk-progress"; current: number; total: number; messageId: string }
   | { type: "bulk-complete"; succeeded: number; failed: number; total: number }
   | { type: "debug-logs"; formatted: string; count: number; capacity: number; enabled: boolean }
-  | { type: "enhance-result"; text: string }
+  | { type: "enhance-result"; text: string; requestId: number }
   | { type: "stats"; stats: ChatStats }
   | { type: "diff"; original: string; refined: string }
   | { type: "auto-refine-started"; messageId: string }
@@ -357,7 +365,6 @@ export interface ModelProfileSummary {
 export interface GenerateRequest {
   messages: Array<{ role: MessageRole; content: string }>;
   connectionProfileId: string;
-  timeoutSeconds: number;
   parameters?: Record<string, unknown>;
 }
 
@@ -365,4 +372,5 @@ export interface GenerateResult {
   content: string;
   success: boolean;
   error?: string;
+  aborted?: boolean;
 }

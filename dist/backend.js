@@ -4163,7 +4163,9 @@ var DEFAULT_SETTINGS = {
   userPov: DEFAULT_USER_POV_PRESET_ID,
   maxLorebookTokens: 50000,
   maxMessageContextTokens: 4000,
-  generationTimeoutSecs: 120,
+  streamGenerations: true,
+  ttftTimeoutSecs: 480,
+  totalTimeoutSecs: 900,
   minCharThreshold: 20,
   batchIntervalMs: 2000,
   notificationSoundEnabled: false,
@@ -4172,6 +4174,8 @@ var DEFAULT_SETTINGS = {
   floatWidgetHidden: false,
   floatWidgetSize: 124,
   floatWidgetLumiaMode: true,
+  floatWidgetX: null,
+  floatWidgetY: null,
   debugLogging: false,
   debugLogMaxEntries: 2000,
   debugLogFullPayloads: false
@@ -4988,6 +4992,59 @@ async function assembleStage(stage, prompts, headCollection, ctx) {
   return { messages, diagnostics, merges };
 }
 
+// src/generation/cancel.ts
+var inflight = new Map;
+function register(key) {
+  inflight.get(key)?.abort();
+  const controller = new AbortController;
+  inflight.set(key, controller);
+  return controller;
+}
+function release(key, controller) {
+  if (inflight.get(key) === controller)
+    inflight.delete(key);
+}
+function cancel(key) {
+  const controller = inflight.get(key);
+  if (!controller)
+    return false;
+  controller.abort();
+  inflight.delete(key);
+  return true;
+}
+function cancelAllForChat(userId, chatId) {
+  const prefix = `${userId}:${chatId}:`;
+  const keys = [];
+  for (const key of inflight.keys()) {
+    if (key.startsWith(prefix))
+      keys.push(key);
+  }
+  let cancelled = 0;
+  for (const key of keys) {
+    if (cancel(key))
+      cancelled++;
+  }
+  return cancelled;
+}
+function refineKey(userId, chatId, messageId) {
+  return `${userId}:${chatId}:refine:${messageId}`;
+}
+function enhanceKey(userId, chatId) {
+  return `${userId}:${chatId}:enhance`;
+}
+function bulkKey(userId, chatId) {
+  return `${userId}:${chatId}:bulk`;
+}
+function isAbortError(err) {
+  return err instanceof Error && err.name === "AbortError";
+}
+function makeAbortError(message = "ABORTED") {
+  const err = new Error(message);
+  err.name = "AbortError";
+  return err;
+}
+var ABORTED_ERROR_MARKER = "ABORTED";
+
 // src/resources/model-profiles.ts
 var DEFAULT_SAMPLERS = {
   temperature: null,
@@ -5096,7 +5153,7 @@ async function createModelProfile(userId, connectionProfileId, name) {
   return profile;
 }
 
-// src/generation.ts
+// src/generation/index.ts
 function safeStringify(value) {
   try {
     return JSON.stringify(value);
@@ -5123,8 +5180,6 @@ function buildGenerationParameters(params) {
     result.frequency_penalty = params.frequencyPenalty;
   if (params.presencePenalty !== null)
     result.presence_penalty = params.presencePenalty;
-  if (params.repetitionPenalty !== null)
-    result.repetition_penalty = params.repetitionPenalty;
   return Object.keys(result).length > 0 ? result : undefined;
 }
 async function resolveConnection(connectionProfileId, userId) {
@@ -5145,42 +5200,150 @@ async function resolveConnection(connectionProfileId, userId) {
     return null;
   }
 }
-async function generate(req, userId) {
+function pickStallMessage(streamMode, settings) {
+  if (streamMode) {
+    return `Generation stalled: no first token within ${settings.ttftTimeoutSecs}s. The provider may be slow or unreachable.`;
+  }
+  return `Generation timed out after ${settings.totalTimeoutSecs}s with no response. Streaming is off; consider enabling it for earlier stall detection.`;
+}
+function composeAbortSignals(external, timeoutMs, outcome) {
+  const internal = new AbortController;
+  const timer = setTimeout(() => {
+    if (!internal.signal.aborted && !(external?.aborted ?? false)) {
+      outcome.ourTimeoutFired = true;
+      internal.abort();
+    }
+  }, timeoutMs);
+  const disarm = () => {
+    clearTimeout(timer);
+  };
+  if (!external) {
+    return { signal: internal.signal, disarm };
+  }
+  if (external.aborted) {
+    internal.abort();
+    return { signal: internal.signal, disarm };
+  }
+  const composed = AbortSignal.any([external, internal.signal]);
+  return { signal: composed, disarm };
+}
+function buildSpindleRequest(req, resolved, userId, signal) {
+  const parameters = { ...req.parameters };
+  if (resolved.model)
+    parameters.model = resolved.model;
+  return {
+    type: "raw",
+    messages: req.messages,
+    connection_id: resolved.id,
+    model: resolved.model,
+    parameters,
+    userId,
+    signal
+  };
+}
+async function prepareRequest(req, userId) {
+  const resolved = await resolveConnection(req.connectionProfileId, userId);
+  if (!resolved) {
+    const reason = req.connectionProfileId ? `Connection profile "${req.connectionProfileId}" not found` : "No connection profiles configured. Set a default in Lumiverse Settings -> Connections";
+    spindle.log.warn(`Generation failed: ${reason}`);
+    return { ok: false, error: reason };
+  }
+  const parametersForLog = { ...req.parameters };
+  if (resolved.model)
+    parametersForLog.model = resolved.model;
+  return { ok: true, data: { resolved, parametersForLog } };
+}
+async function generateNonStreaming(req, resolved, userId, options, settings) {
+  const totalMs = Math.max(1, settings.totalTimeoutSecs) * 1000;
+  const outcome = { ourTimeoutFired: false };
+  const { signal, disarm } = composeAbortSignals(options.signal, totalMs, outcome);
   try {
-    const timeoutMs = req.timeoutSeconds * 1000;
-    const resolved = await resolveConnection(req.connectionProfileId, userId);
-    if (!resolved) {
-      const reason = req.connectionProfileId ? `Connection profile "${req.connectionProfileId}" not found` : "No connection profiles configured. Set a default in Lumiverse Settings -> Connections";
-      spindle.log.warn(`Generation failed: ${reason}`);
-      return { content: "", success: false, error: reason };
-    }
-    const parameters = { ...req.parameters };
-    if (resolved.model)
-      parameters.model = resolved.model;
-    debug(userId, `Generation: connection=${resolved.id}${req.connectionProfileId ? "" : " (default)"}, model=${resolved.model || "none"}, msgs=${req.messages.length}, params=${JSON.stringify(parameters)}`);
-    if (isFullPayloadEnabled(userId)) {
-      debug(userId, `Generation request messages: ${safeStringify(req.messages)}`);
-    }
-    const result = await Promise.race([
-      spindle.generate.raw({
-        type: "raw",
-        messages: req.messages,
-        connection_id: resolved.id,
-        model: resolved.model,
-        parameters,
-        userId
-      }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("Generation timed out")), timeoutMs))
-    ]);
+    const request = buildSpindleRequest(req, resolved, userId, signal);
+    const result = await spindle.generate.raw(request);
+    const content = result?.content ?? "";
     if (isFullPayloadEnabled(userId)) {
       debug(userId, `Generation response: ${safeStringify(result)}`);
     }
-    return { content: result.content ?? "", success: true };
+    return { content, success: true };
   } catch (err) {
+    if (isAbortError(err)) {
+      if (options.signal?.aborted && !outcome.ourTimeoutFired) {
+        return { content: "", success: false, error: "ABORTED", aborted: true };
+      }
+      const message2 = pickStallMessage(false, settings);
+      spindle.log.warn(`Generation failed: ${message2}`);
+      return { content: "", success: false, error: message2 };
+    }
     const message = err instanceof Error ? err.message : String(err);
     spindle.log.warn(`Generation failed: ${message}`);
     return { content: "", success: false, error: message };
+  } finally {
+    disarm();
   }
+}
+async function generateStreaming(req, resolved, userId, options, settings) {
+  const ttftMs = Math.max(1, settings.ttftTimeoutSecs) * 1000;
+  const outcome = { ourTimeoutFired: false };
+  const { signal, disarm: disarmTtft } = composeAbortSignals(options.signal, ttftMs, outcome);
+  let firstTokenSeen = false;
+  let aggregated = "";
+  let receivedDone = false;
+  try {
+    const request = buildSpindleRequest(req, resolved, userId, signal);
+    const stream = spindle.generate.rawStream(request);
+    for await (const chunk of stream) {
+      if (chunk.type === "token" || chunk.type === "reasoning") {
+        if (!firstTokenSeen) {
+          firstTokenSeen = true;
+          disarmTtft();
+        }
+        if (chunk.type === "token")
+          aggregated += chunk.token;
+      } else if (chunk.type === "done") {
+        receivedDone = true;
+        aggregated = chunk.content ?? aggregated;
+        if (isFullPayloadEnabled(userId)) {
+          debug(userId, `Generation stream done: ${safeStringify(chunk)}`);
+        }
+        return { content: aggregated, success: true };
+      }
+    }
+    if (!receivedDone) {
+      spindle.log.warn(`Generation stream ended without a 'done' chunk (got ${aggregated.length} chars)`);
+      return {
+        content: "",
+        success: false,
+        error: "Stream ended without a completion marker"
+      };
+    }
+    return { content: aggregated, success: true };
+  } catch (err) {
+    if (isAbortError(err)) {
+      if (options.signal?.aborted && !outcome.ourTimeoutFired) {
+        return { content: "", success: false, error: "ABORTED", aborted: true };
+      }
+      const message2 = pickStallMessage(true, settings);
+      spindle.log.warn(`Generation failed: ${message2}`);
+      return { content: "", success: false, error: message2 };
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    spindle.log.warn(`Generation failed: ${message}`);
+    return { content: "", success: false, error: message };
+  } finally {
+    disarmTtft();
+  }
+}
+async function generate(req, userId, options = {}) {
+  const settings = await getSettings(userId);
+  const prepared = await prepareRequest(req, userId);
+  if (!prepared.ok)
+    return { content: "", success: false, error: prepared.error };
+  const { resolved, parametersForLog } = prepared.data;
+  debug(userId, `Generation: connection=${resolved.id}${req.connectionProfileId ? "" : " (default)"}, model=${resolved.model || "none"}, msgs=${req.messages.length}, streaming=${settings.streamGenerations}, params=${JSON.stringify(parametersForLog)}`);
+  if (isFullPayloadEnabled(userId)) {
+    debug(userId, `Generation request messages: ${safeStringify(req.messages)}`);
+  }
+  return settings.streamGenerations ? generateStreaming(req, resolved, userId, options, settings) : generateNonStreaming(req, resolved, userId, options, settings);
 }
 
 // src/refinement/model-resolver.ts
@@ -5341,12 +5504,14 @@ async function runPipeline(pipeline, input, initialLatest, proposals, emitStages
     const req = {
       messages: assembled.messages,
       connectionProfileId: stageModel.connectionProfileId,
-      timeoutSeconds: input.settings.generationTimeoutSecs,
       parameters: injectReasoningParams(stageModel.parameters, stageModel.reasoning)
     };
     debug(input.userId, `runPipeline stage ${i + 1}/${pipeline.stages.length} "${stage.name}" msgs=${assembled.messages.length} merges=${assembled.merges} emit=${emitStages} stageProfile="${stage.modelProfileId || "(inherit)"}"`);
-    const result = await generate(req, input.userId);
+    const result = await generate(req, input.userId, { signal: input.signal });
     if (!result.success) {
+      if (result.aborted) {
+        throw makeAbortError(result.error || "ABORTED");
+      }
       throw new Error(result.error || `Stage "${stage.name}" failed`);
     }
     const rawContent = stageModel.reasoning.stripCoTTags ? removeCoTTags(result.content) : result.content;
@@ -5376,6 +5541,9 @@ async function runParallel(input) {
     debug(input.userId, `runParallel: dispatching proposal ${i + 1}`);
     return runPipeline(p, input, input.latest, undefined, false);
   }));
+  if (input.signal?.aborted) {
+    throw makeAbortError("ABORTED");
+  }
   const proposalOutputs = [];
   const proposalRecords = [];
   for (let i = 0;i < proposalSettled.length; i++) {
@@ -5515,7 +5683,28 @@ async function buildContext(chatId, messageId, userId, settings) {
 }
 
 // src/refinement/index.ts
-async function refineSingle(chatId, messageId, userId, send) {
+function composeSignals(...signals) {
+  const present = signals.filter((s) => !!s);
+  if (present.length === 0)
+    return;
+  if (present.length === 1)
+    return present[0];
+  return AbortSignal.any(present);
+}
+function sleepAbortable(ms, signal) {
+  return new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener("abort", () => {
+      clearTimeout(timer);
+      resolve();
+    }, { once: true });
+  });
+}
+async function refineSingle(chatId, messageId, userId, send, options = {}) {
   let success = false;
   debug(userId, `refineSingle: enqueued ${messageId.slice(0, 8)} in ${chatId.slice(0, 8)}`);
   await enqueueChatOperation(`${userId}:${chatId}`, async () => {
@@ -5525,165 +5714,208 @@ async function refineSingle(chatId, messageId, userId, send) {
       debug(userId, `refineSingle: skipped ${messageId.slice(0, 8)}: settings.enabled=false`);
       return;
     }
-    send({ type: "refine-started", messageId });
+    if (options.externalSignal?.aborted) {
+      debug(userId, `refineSingle: pre-start abort ${messageId.slice(0, 8)}: external signal already fired`);
+      return;
+    }
+    const refineCancelKey = refineKey(userId, chatId, messageId);
+    const ownController = register(refineCancelKey);
+    const signal = composeSignals(options.externalSignal, ownController.signal);
     try {
-      const { message, latest, context, pov, userMessage, characterId, loreBlock } = await buildContext(chatId, messageId, userId, settings);
-      debug(userId, `refineSingle: buildContext done ${messageId.slice(0, 8)} role=${message.role} swipeId=${message.swipe_id} contentLen=${message.content.length} loreLen=${loreBlock.length}`);
-      const startSwipeId = message.swipe_id;
-      const startContent = message.content;
-      if (message.content.length < settings.minCharThreshold) {
-        debug(userId, `Refinement skipped for ${messageId}: below threshold (${message.content.length} < ${settings.minCharThreshold})`);
-        send({ type: "refine-complete", messageId, success: true });
-        success = true;
-        return;
-      }
-      const model = await resolveModel(settings, userId);
-      const isUserMessage = message.role === "user";
-      const presetId = isUserMessage ? settings.currentInputPresetId : settings.currentPresetId;
-      const slotLabel = isUserMessage ? "input" : "output";
-      const startTime = Date.now();
-      let refinedText;
-      let strategy;
-      const stageResults = [];
-      const preset = await getPreset(userId, presetId);
-      if (!preset) {
-        send({
-          type: "refine-error",
-          messageId,
-          error: `Active ${slotLabel} preset "${presetId}" not found. Select a preset in Hone Settings.`
-        });
-        return;
-      }
-      debug(userId, `refineSingle: slot=${slotLabel} preset="${preset.name}" strategy=${preset.strategy}`);
-      const shieldEnabled = preset.shieldLiteralBlocks && !isUserMessage;
-      const include = preset.shieldConfig?.include?.length ? preset.shieldConfig.include : undefined;
-      const exclude = preset.shieldConfig?.exclude?.length ? preset.shieldConfig.exclude : undefined;
-      const { masked, blocks } = shieldEnabled ? maskLiteralBlocks(message.content, include, exclude) : { masked: message.content, blocks: [] };
-      if (!shieldEnabled) {
-        const reason = isUserMessage ? "user-message path (shielding disabled)" : "preset.shieldLiteralBlocks=false";
-        debug(userId, `refineSingle: shielding skipped: ${reason}`);
-      } else {
-        debug(userId, `refineSingle: shielding on: patterns matched ${blocks.length} block(s), sourceLen ${message.content.length} -> maskedLen ${masked.length}`);
-        for (let i = 0;i < blocks.length; i++) {
-          const b = blocks[i];
-          const preview = b.original.replace(/\n/g, "\\n").slice(0, 80);
-          debug(userId, `  shield[${i}] len=${b.original.length} preview="${preview}${b.original.length > 80 ? "\u2026" : ""}"`);
-        }
-      }
-      const latestForRun = isUserMessage ? latest : masked;
-      const shieldPreservationNote = buildShieldPreservationNote(blocks);
-      try {
-        const outcome = await runStrategy({
-          preset,
-          settings,
-          model,
-          context,
-          latest: latestForRun,
-          messageText: masked,
-          userMessage,
-          loreBlock,
-          pov,
-          chatId,
-          characterId,
-          userId,
-          shieldPreservationNote,
-          onStageComplete: (record) => {
-            const cleaned = blocks.length > 0 ? { ...record, text: substituteShields(record.text, blocks) } : record;
-            stageResults.push(cleaned);
-            send({ type: "stage-complete", messageId, stage: cleaned });
-          }
-        });
-        refinedText = outcome.refinedText;
-        strategy = outcome.strategy;
-      } catch (err) {
-        const error = err instanceof Error ? err.message : String(err);
-        send({ type: "refine-error", messageId, error });
-        return;
-      }
-      if (blocks.length > 0) {
-        const before = refinedText.length;
-        const survivors = blocks.filter((b) => refinedText.includes(b.placeholder));
-        const droppedList = blocks.filter((b) => !refinedText.includes(b.placeholder));
-        debug(userId, `refineSingle: unmask: LLM preserved ${survivors.length}/${blocks.length} shield(s); ${droppedList.length} dropped will be appended before trailing scaffolding`);
-        for (const b of droppedList) {
-          const preview = b.original.replace(/\n/g, "\\n").slice(0, 60);
-          debug(userId, `  dropped shield "${preview}${b.original.length > 60 ? "\u2026" : ""}": recovering at end`);
-        }
-        refinedText = unmaskLiteralBlocks(refinedText, blocks);
-        debug(userId, `refineSingle: unmask done: outputLen ${before} -> ${refinedText.length}`);
-      }
-      const fresh = (await spindle.chat.getMessages(chatId)).find((m) => m.id === messageId);
-      if (!fresh) {
-        debug(userId, `refineSingle: race guard ${messageId.slice(0, 8)}: message no longer exists`);
-        send({ type: "refine-error", messageId, error: "Message no longer exists" });
-        return;
-      }
-      if (fresh.swipe_id !== startSwipeId) {
-        debug(userId, `Refine aborted for ${messageId}: swipe navigated ${startSwipeId} -> ${fresh.swipe_id} during generation`);
-        send({
-          type: "refine-error",
-          messageId,
-          error: "Swipe changed during refinement; refinement cancelled to avoid overwriting the wrong swipe"
-        });
-        return;
-      }
-      if (fresh.content !== startContent) {
-        debug(userId, `Refine aborted for ${messageId}: swipe ${startSwipeId} content edited during generation (startLen=${startContent.length}, freshLen=${fresh.content?.length ?? -1})`);
-        send({
-          type: "refine-error",
-          messageId,
-          error: "Message content was edited during refinement; refinement cancelled to avoid overwriting your edit"
-        });
-        return;
-      }
-      debug(userId, `refineSingle: race guard passed for ${messageId.slice(0, 8)} swipe ${startSwipeId}`);
-      const undoEntry = {
-        originalContent: startContent,
-        refinedContent: refinedText,
-        timestamp: Date.now(),
-        strategy,
-        swipeId: startSwipeId,
-        ...stageResults.length > 0 ? { stages: stageResults } : {}
-      };
-      await saveUndo(userId, chatId, messageId, startSwipeId, undoEntry);
-      debug(userId, `refineSingle: saveUndo done ${messageId.slice(0, 8)} swipe ${startSwipeId} stages=${stageResults.length}`);
-      try {
-        await spindle.chat.updateMessage(chatId, messageId, {
-          content: refinedText,
-          metadata: { ...message.metadata, hone_refined: true }
-        });
-        debug(userId, `refineSingle: updateMessage done ${messageId.slice(0, 8)} swipe ${startSwipeId}`);
-      } catch (updateErr) {
-        const updateError = updateErr instanceof Error ? updateErr.message : String(updateErr);
-        spindle.log.warn(`[Hone] rollback: updateMessage failed for ${messageId} swipe ${startSwipeId} after saveUndo succeeded: ${updateError}; deleting orphan undo entry`);
-        try {
-          await deleteUndo(userId, chatId, messageId, startSwipeId);
-          spindle.log.warn(`[Hone] rollback: orphan undo entry deleted for ${messageId} swipe ${startSwipeId}`);
-        } catch (rollbackErr) {
-          const rollbackError = rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr);
-          spindle.log.error(`[Hone] rollback FAILED for ${messageId} swipe ${startSwipeId}: ${rollbackError}; orphan undo entry will remain until next refine or prune`);
-        }
-        throw updateErr;
-      }
-      const duration = Date.now() - startTime;
-      debug(userId, `Refinement complete for ${messageId} swipe ${startSwipeId}: strategy=${strategy}, duration=${duration}ms`);
-      if (settings.autoShowDiff) {
-        send({ type: "diff", original: startContent, refined: refinedText });
-      }
-      send({ type: "refine-complete", messageId, success: true });
-      success = true;
-      try {
-        await incrementStats(userId, chatId, strategy);
-      } catch (statsErr) {
-        spindle.log.warn(`[Hone] best-effort: incrementStats failed for ${messageId} (${strategy}): ${statsErr instanceof Error ? statsErr.message : statsErr}; stats may be under-counted`);
-      }
-    } catch (err) {
-      const error = err instanceof Error ? err.message : String(err);
-      spindle.log.warn(`Refine failed for ${messageId}: ${error}`);
-      send({ type: "refine-error", messageId, error: `Refinement failed: ${error}` });
+      success = await runRefineSingleBody({
+        chatId,
+        messageId,
+        userId,
+        send,
+        settings,
+        signal
+      });
+    } finally {
+      release(refineCancelKey, ownController);
     }
   });
   return success;
+}
+async function runRefineSingleBody(args) {
+  const { chatId, messageId, userId, send, settings, signal } = args;
+  send({ type: "refine-started", messageId });
+  try {
+    const { message, latest, context, pov, userMessage, characterId, loreBlock } = await buildContext(chatId, messageId, userId, settings);
+    debug(userId, `refineSingle: buildContext done ${messageId.slice(0, 8)} role=${message.role} swipeId=${message.swipe_id} contentLen=${message.content.length} loreLen=${loreBlock.length}`);
+    const startSwipeId = message.swipe_id;
+    const startContent = message.content;
+    if (message.content.length < settings.minCharThreshold) {
+      debug(userId, `Refinement skipped for ${messageId}: below threshold (${message.content.length} < ${settings.minCharThreshold})`);
+      send({ type: "refine-complete", messageId, success: true });
+      return true;
+    }
+    const model = await resolveModel(settings, userId);
+    const isUserMessage = message.role === "user";
+    const presetId = isUserMessage ? settings.currentInputPresetId : settings.currentPresetId;
+    const slotLabel = isUserMessage ? "input" : "output";
+    const startTime = Date.now();
+    let refinedText;
+    let strategy;
+    const stageResults = [];
+    const preset = await getPreset(userId, presetId);
+    if (!preset) {
+      send({
+        type: "refine-error",
+        messageId,
+        error: `Active ${slotLabel} preset "${presetId}" not found. Select a preset in Hone Settings.`
+      });
+      return false;
+    }
+    debug(userId, `refineSingle: slot=${slotLabel} preset="${preset.name}" strategy=${preset.strategy}`);
+    const shieldEnabled = preset.shieldLiteralBlocks && !isUserMessage;
+    const include = preset.shieldConfig?.include?.length ? preset.shieldConfig.include : undefined;
+    const exclude = preset.shieldConfig?.exclude?.length ? preset.shieldConfig.exclude : undefined;
+    const { masked, blocks } = shieldEnabled ? maskLiteralBlocks(message.content, include, exclude) : { masked: message.content, blocks: [] };
+    if (!shieldEnabled) {
+      const reason = isUserMessage ? "user-message path (shielding disabled)" : "preset.shieldLiteralBlocks=false";
+      debug(userId, `refineSingle: shielding skipped: ${reason}`);
+    } else {
+      debug(userId, `refineSingle: shielding on: patterns matched ${blocks.length} block(s), sourceLen ${message.content.length} -> maskedLen ${masked.length}`);
+      for (let i = 0;i < blocks.length; i++) {
+        const b = blocks[i];
+        const preview = b.original.replace(/\n/g, "\\n").slice(0, 80);
+        debug(userId, `  shield[${i}] len=${b.original.length} preview="${preview}${b.original.length > 80 ? "\u2026" : ""}"`);
+      }
+    }
+    const latestForRun = isUserMessage ? latest : masked;
+    const shieldPreservationNote = buildShieldPreservationNote(blocks);
+    try {
+      const outcome = await runStrategy({
+        preset,
+        settings,
+        model,
+        context,
+        latest: latestForRun,
+        messageText: masked,
+        userMessage,
+        loreBlock,
+        pov,
+        chatId,
+        characterId,
+        userId,
+        shieldPreservationNote,
+        signal,
+        onStageComplete: (record) => {
+          const cleaned = blocks.length > 0 ? { ...record, text: substituteShields(record.text, blocks) } : record;
+          stageResults.push(cleaned);
+          send({ type: "stage-complete", messageId, stage: cleaned });
+        }
+      });
+      refinedText = outcome.refinedText;
+      strategy = outcome.strategy;
+    } catch (err) {
+      if (isAbortError(err)) {
+        debug(userId, `refineSingle: aborted ${messageId.slice(0, 8)}`);
+        send({ type: "refine-error", messageId, error: ABORTED_ERROR_MARKER });
+        return false;
+      }
+      const error = err instanceof Error ? err.message : String(err);
+      send({ type: "refine-error", messageId, error });
+      return false;
+    }
+    if (signal.aborted) {
+      debug(userId, `refineSingle: post-strategy abort ${messageId.slice(0, 8)}: discarding result`);
+      send({ type: "refine-error", messageId, error: ABORTED_ERROR_MARKER });
+      return false;
+    }
+    if (blocks.length > 0) {
+      const before = refinedText.length;
+      const survivors = blocks.filter((b) => refinedText.includes(b.placeholder));
+      const droppedList = blocks.filter((b) => !refinedText.includes(b.placeholder));
+      debug(userId, `refineSingle: unmask: LLM preserved ${survivors.length}/${blocks.length} shield(s); ${droppedList.length} dropped will be appended before trailing scaffolding`);
+      for (const b of droppedList) {
+        const preview = b.original.replace(/\n/g, "\\n").slice(0, 60);
+        debug(userId, `  dropped shield "${preview}${b.original.length > 60 ? "\u2026" : ""}": recovering at end`);
+      }
+      refinedText = unmaskLiteralBlocks(refinedText, blocks);
+      debug(userId, `refineSingle: unmask done: outputLen ${before} -> ${refinedText.length}`);
+    }
+    const fresh = (await spindle.chat.getMessages(chatId)).find((m) => m.id === messageId);
+    if (!fresh) {
+      debug(userId, `refineSingle: race guard ${messageId.slice(0, 8)}: message no longer exists`);
+      send({ type: "refine-error", messageId, error: "Message no longer exists" });
+      return false;
+    }
+    if (fresh.swipe_id !== startSwipeId) {
+      debug(userId, `Refine aborted for ${messageId}: swipe navigated ${startSwipeId} -> ${fresh.swipe_id} during generation`);
+      send({
+        type: "refine-error",
+        messageId,
+        error: "Swipe changed during refinement; refinement cancelled to avoid overwriting the wrong swipe"
+      });
+      return false;
+    }
+    if (fresh.content !== startContent) {
+      debug(userId, `Refine aborted for ${messageId}: swipe ${startSwipeId} content edited during generation (startLen=${startContent.length}, freshLen=${fresh.content?.length ?? -1})`);
+      send({
+        type: "refine-error",
+        messageId,
+        error: "Message content was edited during refinement; refinement cancelled to avoid overwriting your edit"
+      });
+      return false;
+    }
+    debug(userId, `refineSingle: race guard passed for ${messageId.slice(0, 8)} swipe ${startSwipeId}`);
+    if (signal.aborted) {
+      debug(userId, `refineSingle: abort before saveUndo ${messageId.slice(0, 8)}: discarding result`);
+      send({ type: "refine-error", messageId, error: ABORTED_ERROR_MARKER });
+      return false;
+    }
+    const undoEntry = {
+      originalContent: startContent,
+      refinedContent: refinedText,
+      timestamp: Date.now(),
+      strategy,
+      swipeId: startSwipeId,
+      ...stageResults.length > 0 ? { stages: stageResults } : {}
+    };
+    await saveUndo(userId, chatId, messageId, startSwipeId, undoEntry);
+    debug(userId, `refineSingle: saveUndo done ${messageId.slice(0, 8)} swipe ${startSwipeId} stages=${stageResults.length}`);
+    try {
+      await spindle.chat.updateMessage(chatId, messageId, {
+        content: refinedText,
+        metadata: { ...message.metadata, hone_refined: true }
+      });
+      debug(userId, `refineSingle: updateMessage done ${messageId.slice(0, 8)} swipe ${startSwipeId}`);
+    } catch (updateErr) {
+      const updateError = updateErr instanceof Error ? updateErr.message : String(updateErr);
+      spindle.log.warn(`[Hone] rollback: updateMessage failed for ${messageId} swipe ${startSwipeId} after saveUndo succeeded: ${updateError}; deleting orphan undo entry`);
+      try {
+        await deleteUndo(userId, chatId, messageId, startSwipeId);
+        spindle.log.warn(`[Hone] rollback: orphan undo entry deleted for ${messageId} swipe ${startSwipeId}`);
+      } catch (rollbackErr) {
+        const rollbackError = rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr);
+        spindle.log.error(`[Hone] rollback FAILED for ${messageId} swipe ${startSwipeId}: ${rollbackError}; orphan undo entry will remain until next refine or prune`);
+      }
+      throw updateErr;
+    }
+    const duration = Date.now() - startTime;
+    debug(userId, `Refinement complete for ${messageId} swipe ${startSwipeId}: strategy=${strategy}, duration=${duration}ms`);
+    if (settings.autoShowDiff) {
+      send({ type: "diff", original: startContent, refined: refinedText });
+    }
+    send({ type: "refine-complete", messageId, success: true });
+    try {
+      await incrementStats(userId, chatId, strategy);
+    } catch (statsErr) {
+      spindle.log.warn(`[Hone] best-effort: incrementStats failed for ${messageId} (${strategy}): ${statsErr instanceof Error ? statsErr.message : statsErr}; stats may be under-counted`);
+    }
+    return true;
+  } catch (err) {
+    if (isAbortError(err)) {
+      debug(userId, `refineSingle: aborted (outer) ${messageId.slice(0, 8)}`);
+      send({ type: "refine-error", messageId, error: ABORTED_ERROR_MARKER });
+      return false;
+    }
+    const error = err instanceof Error ? err.message : String(err);
+    spindle.log.warn(`Refine failed for ${messageId}: ${error}`);
+    send({ type: "refine-error", messageId, error: `Refinement failed: ${error}` });
+    return false;
+  }
 }
 async function undoRefine(chatId, messageId, userId, send) {
   debug(userId, `undoRefine: enqueued ${messageId.slice(0, 8)}`);
@@ -5730,35 +5962,49 @@ async function refineBulk(chatId, messageIds, userId, send) {
   let failed = 0;
   let lastError = null;
   debug(userId, `refineBulk: starting ${messageIds.length} messages in ${chatId.slice(0, 8)}`);
+  const bulkCancelKey = bulkKey(userId, chatId);
+  const bulkController = register(bulkCancelKey);
   const bulkSend = (msg) => {
     if (msg.type === "diff")
       return;
     if (msg.type === "refine-error") {
-      if (msg.error) {
+      const isAbort = msg.error === ABORTED_ERROR_MARKER;
+      if (msg.error && !isAbort) {
         spindle.log.warn(`[Hone] bulk: per-message error for ${msg.messageId} suppressed (modal cap), original error: ${msg.error}`);
         lastError = msg.error;
       }
-      send({ ...msg, error: "" });
+      send({ ...msg, error: isAbort ? ABORTED_ERROR_MARKER : "" });
       return;
     }
     send(msg);
   };
-  for (let i = 0;i < messageIds.length; i++) {
-    const messageId = messageIds[i];
-    bulkSend({ type: "bulk-progress", current: i + 1, total: messageIds.length, messageId });
-    const ok = await refineSingle(chatId, messageId, userId, bulkSend);
-    if (ok)
-      succeeded++;
-    else
-      failed++;
-    if (i < messageIds.length - 1 && settings.batchIntervalMs > 0) {
-      await new Promise((resolve) => setTimeout(resolve, settings.batchIntervalMs));
+  try {
+    for (let i = 0;i < messageIds.length; i++) {
+      if (bulkController.signal.aborted) {
+        debug(userId, `refineBulk: aborted at ${i}/${messageIds.length}`);
+        break;
+      }
+      const messageId = messageIds[i];
+      bulkSend({ type: "bulk-progress", current: i + 1, total: messageIds.length, messageId });
+      const ok = await refineSingle(chatId, messageId, userId, bulkSend, {
+        externalSignal: bulkController.signal
+      });
+      if (ok)
+        succeeded++;
+      else
+        failed++;
+      if (i < messageIds.length - 1 && settings.batchIntervalMs > 0) {
+        await sleepAbortable(settings.batchIntervalMs, bulkController.signal);
+      }
     }
+  } finally {
+    release(bulkCancelKey, bulkController);
   }
-  debug(userId, `bulk refine complete: ${succeeded}/${messageIds.length} succeeded, ${failed} failed${lastError ? `, last error: ${lastError}` : ""}`);
+  const aborted = bulkController.signal.aborted;
+  debug(userId, `bulk refine complete: ${succeeded}/${messageIds.length} succeeded, ${failed} failed${aborted ? " (cancelled)" : ""}${lastError ? `, last error: ${lastError}` : ""}`);
   send({ type: "bulk-complete", succeeded, failed, total: messageIds.length });
 }
-async function enhanceUserMessage(text, chatId, userId, mode, send) {
+async function enhanceUserMessage(text, chatId, userId, mode, requestId, send) {
   debug(userId, `enhanceUserMessage: mode=${mode} chat=${chatId.slice(0, 8)} textLen=${text.length}`);
   const settings = await getSettings(userId);
   if (!settings.userEnhanceEnabled) {
@@ -5777,6 +6023,9 @@ async function enhanceUserMessage(text, chatId, userId, mode, send) {
     }
     return;
   }
+  const enhanceCancelKey = enhanceKey(userId, chatId);
+  const ownController = register(enhanceCancelKey);
+  const signal = ownController.signal;
   try {
     const preset = await getPreset(userId, settings.currentInputPresetId);
     if (!preset) {
@@ -5813,12 +6062,25 @@ async function enhanceUserMessage(text, chatId, userId, mode, send) {
       pov,
       chatId,
       characterId,
-      userId
+      userId,
+      signal
     });
-    send({ type: "enhance-result", text: outcome.refinedText });
+    if (signal.aborted) {
+      debug(userId, `enhanceUserMessage: post-strategy abort: discarding result`);
+      send({ type: "refine-error", messageId: "", error: ABORTED_ERROR_MARKER });
+      return;
+    }
+    send({ type: "enhance-result", text: outcome.refinedText, requestId });
   } catch (err) {
+    if (isAbortError(err)) {
+      debug(userId, `enhanceUserMessage: aborted`);
+      send({ type: "refine-error", messageId: "", error: ABORTED_ERROR_MARKER });
+      return;
+    }
     const error = err instanceof Error ? err.message : String(err);
     send({ type: "refine-error", messageId: "", error });
+  } finally {
+    release(enhanceCancelKey, ownController);
   }
 }
 async function previewStage(preset, stage, stageIndex, totalStages, userId, proposals, chatId, slot = "output") {
@@ -6084,7 +6346,7 @@ var refineHandlers = {
     if (!requirePermission("chat_mutation", ctx))
       return;
     debug(ctx.userId, `Enhancing user message in chat ${msg.chatId} (mode: ${msg.mode})`);
-    await enhanceUserMessage(msg.text, msg.chatId, ctx.userId, msg.mode, ctx.send);
+    await enhanceUserMessage(msg.text, msg.chatId, ctx.userId, msg.mode, msg.requestId, ctx.send);
   },
   async "refine-last"(_msg, ctx) {
     if (!requirePermission("chat_mutation", ctx))
@@ -6231,6 +6493,30 @@ var refineHandlers = {
         ctx.send({ type: "refine-error", messageId: msg.messageId, error });
       }
     });
+  },
+  async "cancel-refine"(msg, ctx) {
+    const key = refineKey(ctx.userId, msg.chatId, msg.messageId);
+    const found = cancel(key);
+    debug(ctx.userId, `cancel-refine ${msg.messageId.slice(0, 8)}: ${found ? "aborted" : "no in-flight"}`);
+  },
+  async "cancel-enhance"(msg, ctx) {
+    const key = enhanceKey(ctx.userId, msg.chatId);
+    const found = cancel(key);
+    debug(ctx.userId, `cancel-enhance chat=${msg.chatId.slice(0, 8)}: ${found ? "aborted" : "no in-flight"}`);
+  },
+  async "cancel-bulk"(msg, ctx) {
+    const key = bulkKey(ctx.userId, msg.chatId);
+    const found = cancel(key);
+    debug(ctx.userId, `cancel-bulk chat=${msg.chatId.slice(0, 8)}: ${found ? "aborted" : "no in-flight"}`);
+  },
+  async "cancel-active"(_msg, ctx) {
+    const chatId = await getActiveChatIdFor(ctx.userId);
+    if (!chatId) {
+      debug(ctx.userId, `cancel-active: no active chat`);
+      return;
+    }
+    const n = cancelAllForChat(ctx.userId, chatId);
+    debug(ctx.userId, `cancel-active chat=${chatId.slice(0, 8)}: cancelled ${n} op(s)`);
   },
   async "view-diff"(msg, ctx) {
     if (!requirePermission("chats", ctx, msg.messageId))

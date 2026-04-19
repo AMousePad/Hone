@@ -72,14 +72,6 @@ export function setup(ctx: SpindleFrontendContext) {
   }
 
   let floatWidget: ReturnType<typeof createFloatWidget> | null = null;
-  try {
-    floatWidget = createFloatWidget(ctx, sendToBackend, isReady, {
-      openDrawerTab: () => drawerTab?.activate(),
-    });
-    cleanups.push(() => floatWidget?.destroy());
-  } catch (err) {
-    flog.warn("setup: createFloatWidget failed", err);
-  }
 
   // Per-message refine/undo button. DOM-injected because Lumiverse
   // doesn't (yet) expose a per-message action contribution point;
@@ -134,10 +126,36 @@ export function setup(ctx: SpindleFrontendContext) {
         currentSettings = msg.settings;
         settingsPage.update(msg.settings);
         inputAreaInjector?.setEnabled(msg.settings.userEnhanceEnabled);
-        floatWidget?.setConfirmRequired(msg.settings.floatWidgetConfirm);
-        floatWidget?.applySize(msg.settings.floatWidgetSize);
-        floatWidget?.applyHidden(msg.settings.floatWidgetHidden);
-        floatWidget?.setLumiaMode(msg.settings.floatWidgetLumiaMode);
+        if (!floatWidget) {
+          try {
+            const savedX = msg.settings.floatWidgetX;
+            const savedY = msg.settings.floatWidgetY;
+            const initialPosition =
+              typeof savedX === "number" &&
+              typeof savedY === "number" &&
+              Number.isFinite(savedX) &&
+              Number.isFinite(savedY)
+                ? { x: savedX, y: savedY }
+                : undefined;
+            floatWidget = createFloatWidget(ctx, sendToBackend, isReady, {
+              openDrawerTab: () => drawerTab?.activate(),
+              initialSize: msg.settings.floatWidgetSize,
+              initialHidden: msg.settings.floatWidgetHidden,
+              initialLumiaMode: msg.settings.floatWidgetLumiaMode,
+              initialConfirmRequired: msg.settings.floatWidgetConfirm,
+              initialPosition,
+            });
+            cleanups.push(() => floatWidget?.destroy());
+            if (ready) floatWidget.setReady(true);
+          } catch (err) {
+            flog.warn("setup: createFloatWidget failed", err);
+          }
+        } else {
+          floatWidget.setConfirmRequired(msg.settings.floatWidgetConfirm);
+          floatWidget.applySize(msg.settings.floatWidgetSize);
+          floatWidget.applyHidden(msg.settings.floatWidgetHidden);
+          floatWidget.setLumiaMode(msg.settings.floatWidgetLumiaMode);
+        }
         break;
 
       case "active-chat": {
@@ -184,7 +202,7 @@ export function setup(ctx: SpindleFrontendContext) {
 
       case "enhance-result":
         if (msg.text) {
-          inputAreaInjector?.onEnhanceResult(msg.text);
+          inputAreaInjector?.onEnhanceResult(msg.text, msg.requestId);
         }
         break;
 
@@ -201,14 +219,15 @@ export function setup(ctx: SpindleFrontendContext) {
         showPreviewModal(ctx, msg.path, msg.stageIndex, msg.messages, msg.diagnostics);
         break;
 
-      case "refine-error":
+      case "refine-error": {
+        const isAborted = msg.error === "ABORTED";
         if (msg.messageId) {
           messageInjector?.setBusy(msg.messageId, false);
         }
         if (!msg.messageId) {
           inputAreaInjector?.onEnhanceError();
         }
-        if (msg.error) {
+        if (msg.error && !isAborted) {
           // Flip the widget to error-chibi for the modal's lifetime,
           // then revert. `.finally()` runs on confirm / cancel /
           // dismiss: exactly once.
@@ -224,6 +243,7 @@ export function setup(ctx: SpindleFrontendContext) {
             .finally(() => floatWidget?.setErrorShowing(false));
         }
         break;
+      }
 
       case "bulk-complete":
         // Summary modal only on partial/total failure; fully
@@ -254,6 +274,32 @@ export function setup(ctx: SpindleFrontendContext) {
     }
   });
   cleanups.push(msgUnsub);
+
+  // Test bridge: opt-in via `?hone-test=1`. Only installs when the
+  // query param is present, so production users never see a global.
+  // Grants exactly the seams a Playwright spec needs (sendToBackend +
+  // a message tap) and nothing the extension didn't already have on
+  // its own. See tests/playwright/README.md.
+  if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("hone-test") === "1") {
+    const subs = new Set<(msg: BackendToFrontend) => void>();
+    const bridgeUnsub = ctx.onBackendMessage((raw) => {
+      const msg = raw as BackendToFrontend;
+      for (const s of subs) {
+        try { s(msg); } catch {}
+      }
+    });
+    cleanups.push(bridgeUnsub);
+    (window as unknown as { __hone: unknown }).__hone = {
+      sendToBackend,
+      onBackendMessage(handler: (msg: BackendToFrontend) => void): () => void {
+        subs.add(handler);
+        return () => { subs.delete(handler); };
+      },
+    };
+    cleanups.push(() => {
+      try { delete (window as unknown as { __hone?: unknown }).__hone; } catch {}
+    });
+  }
 
   /** Fire the handshake IPC burst. Idempotent. */
   function sendInitialHandshake() {

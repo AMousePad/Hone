@@ -416,6 +416,25 @@ export const STYLES = `
   display: none;
 }
 
+.hone-float-widget:not(.hone-float-widget--lumia).hone-float-widget--show-cancel .hone-float-icon--spinner,
+.hone-float-widget:not(.hone-float-widget--lumia).hone-float-widget--show-cancel .hone-float-icon--refine,
+.hone-float-widget:not(.hone-float-widget--lumia).hone-float-widget--show-cancel .hone-float-icon--undo {
+  display: none;
+}
+.hone-float-widget:not(.hone-float-widget--lumia).hone-float-widget--show-cancel .hone-float-icon--cancel {
+  display: inline-flex;
+}
+.hone-float-widget:not(.hone-float-widget--lumia).hone-float-widget--armed-cancel {
+  color: #f59e0b;
+  cursor: pointer;
+}
+.hone-float-widget--lumia.hone-float-widget--armed-cancel {
+  cursor: pointer;
+}
+.hone-float-widget--lumia.hone-float-widget--armed-cancel .hone-float-chibi {
+  animation: hone-float-armed-pulse 1.2s ease-in-out infinite;
+}
+
 /* ── Shared keyframes ─────────────────────────────────────────── */
 
 @keyframes hone-float-armed-pulse {
@@ -1278,6 +1297,20 @@ export const STYLES = `
   font-size: 12px;
   color: var(--lumiverse-text);
   margin: 8px 0;
+}
+.hone-inline-notice {
+  margin-top: 6px;
+  padding: 6px 10px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: var(--lumiverse-radius, 4px);
+  font-size: 12px;
+  color: var(--lumiverse-text);
+  animation: hone-inline-notice-in 150ms ease-out;
+}
+@keyframes hone-inline-notice-in {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 /* ── Pipeline editor ───────────────────────────────────── */

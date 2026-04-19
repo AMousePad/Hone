@@ -4,6 +4,7 @@ import type { ResolvedModel } from "./model-resolver";
 import { resolveProfile, injectReasoningParams } from "./model-resolver";
 import { assembleStage, type AssembleContext } from "../assemble";
 import { generate } from "../generation";
+import { makeAbortError } from "../generation/cancel";
 import { removeCoTTags, extractRefinedContent } from "../text/extract";
 import * as hlog from "../hlog";
 
@@ -24,6 +25,7 @@ export interface RunStrategyInput {
   userId: string;
   shieldPreservationNote?: string;
   onStageComplete?: (record: StageRecord) => void;
+  signal?: AbortSignal;
 }
 
 export interface RunStrategyResult {
@@ -70,7 +72,6 @@ async function runPipeline(
     const req: GenerateRequest = {
       messages: assembled.messages,
       connectionProfileId: stageModel.connectionProfileId,
-      timeoutSeconds: input.settings.generationTimeoutSecs,
       parameters: injectReasoningParams(stageModel.parameters, stageModel.reasoning),
     };
 
@@ -79,8 +80,11 @@ async function runPipeline(
       `runPipeline stage ${i + 1}/${pipeline.stages.length} "${stage.name}" msgs=${assembled.messages.length} merges=${assembled.merges} emit=${emitStages} stageProfile="${stage.modelProfileId || "(inherit)"}"`
     );
 
-    const result = await generate(req, input.userId);
+    const result = await generate(req, input.userId, { signal: input.signal });
     if (!result.success) {
+      if (result.aborted) {
+        throw makeAbortError(result.error || "ABORTED");
+      }
       throw new Error(result.error || `Stage "${stage.name}" failed`);
     }
 
@@ -123,6 +127,10 @@ async function runParallel(input: RunStrategyInput): Promise<RunStrategyResult> 
       return runPipeline(p, input, input.latest, undefined, false);
     })
   );
+
+  if (input.signal?.aborted) {
+    throw makeAbortError("ABORTED");
+  }
 
   const proposalOutputs: string[] = [];
   const proposalRecords: StageRecord[] = [];

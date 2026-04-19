@@ -3,7 +3,7 @@ import type {
   SpindleFloatWidgetHandle,
 } from "lumiverse-spindle-types";
 import type { FrontendToBackend, BackendToFrontend } from "../../types";
-import { REFINE_ICON_SVG, UNDO_ICON_SVG, SPINNER_ICON_SVG } from "../icons";
+import { REFINE_ICON_SVG, UNDO_ICON_SVG, SPINNER_ICON_SVG, CANCEL_ICON_SVG } from "../icons";
 import { CHIBI_NORMAL_URL } from "../generated/chibi-normal";
 import { CHIBI_SLEEPY_URL } from "../generated/chibi-sleepy";
 import { CHIBI_THINKING_URL } from "../generated/chibi-thinking";
@@ -33,7 +33,12 @@ const DEFAULT_SIZE = LUMIA_SIZES.medium;
 const SIZE_MIN_PX = 24;
 const SIZE_MAX_PX = 1920;
 
+function clampSize(px: number): number {
+  return Math.max(SIZE_MIN_PX, Math.min(SIZE_MAX_PX, Math.round(px)));
+}
+
 const CONFIRM_TIMEOUT_MS = 4000;
+const CANCEL_CONFIRM_TIMEOUT_MS = CONFIRM_TIMEOUT_MS;
 /** Pointer movement that flips a tap into a drag. */
 const DRAG_THRESHOLD_PX = 5;
 const EDGE_PAD_PX = 12;
@@ -53,6 +58,11 @@ export interface FloatWidgetOptions {
   /** Opens the Hone drawer tab; wired to the context menu's
    *  "Open Hone Tab" item. */
   openDrawerTab: () => void;
+  initialSize?: number;
+  initialHidden?: boolean;
+  initialLumiaMode?: boolean;
+  initialConfirmRequired?: boolean;
+  initialPosition?: { x: number; y: number };
 }
 
 export function createFloatWidget(
@@ -61,17 +71,23 @@ export function createFloatWidget(
   isReady: () => boolean,
   opts: FloatWidgetOptions
 ) {
-  let currentSize = DEFAULT_SIZE;
-  let currentHidden = false;
+  let currentSize = clampSize(opts.initialSize ?? DEFAULT_SIZE);
+  let currentHidden = opts.initialHidden ?? false;
+  /** Chibi PNG vs classic SVG. Both subtrees are mounted; the
+   *  `.hone-float-widget--lumia` class on the button toggles
+   *  visibility via CSS. */
+  let lumiaMode = opts.initialLumiaMode ?? true;
+  let confirmRequired = opts.initialConfirmRequired ?? false;
 
   let refined = false;
   let busy = false;
   let generating = false;
   let ready = isReady();
-  let confirmRequired = false;
   /** null = idle, "refine"/"undo" = armed for the next tap to fire
-   *  that action. Only reachable when `confirmRequired` is true. */
-  let armed: "refine" | "undo" | null = null;
+   *  that action. Only reachable when `confirmRequired` is true.
+   *  "cancel" = a tap-while-busy primed a cancel-active confirmation,
+   *  always two-tap regardless of `confirmRequired`. */
+  let armed: "refine" | "undo" | "cancel" | null = null;
   let armedTimer: ReturnType<typeof setTimeout> | null = null;
 
   let isHovered = false;
@@ -80,10 +96,6 @@ export function createFloatWidget(
   /** Mirrored from frontend.ts. The widget reacts to the error
    *  modal but doesn't own its lifecycle. Highest-priority display. */
   let errorShowing = false;
-  /** Chibi PNG vs classic SVG. Both subtrees are mounted; the
-   *  `.hone-float-widget--lumia` class on the button toggles
-   *  visibility via CSS. */
-  let lumiaMode = true;
 
   /** Touch-only device. Evaluated once. Touch hybrids (laptops with
    *  touchscreens) report hover: hover and are treated as desktop.
@@ -144,14 +156,18 @@ export function createFloatWidget(
   const spinnerIcon = document.createElement("span");
   spinnerIcon.className = "hone-float-icon hone-float-icon--spinner";
   spinnerIcon.innerHTML = SPINNER_ICON_SVG;
+  const cancelIcon = document.createElement("span");
+  cancelIcon.className = "hone-float-icon hone-float-icon--cancel";
+  cancelIcon.innerHTML = CANCEL_ICON_SVG;
   btn.appendChild(refineIcon);
   btn.appendChild(undoIcon);
   btn.appendChild(spinnerIcon);
+  btn.appendChild(cancelIcon);
 
   /** Scale classic-mode SVGs. Chibi <img> uses percentage CSS. */
   function applyIconSize(size: number) {
     const iconSize = Math.round(size * 0.5);
-    for (const icon of [refineIcon, undoIcon, spinnerIcon]) {
+    for (const icon of [refineIcon, undoIcon, spinnerIcon, cancelIcon]) {
       const svg = icon.querySelector("svg");
       if (svg) {
         svg.setAttribute("width", String(iconSize));
@@ -161,8 +177,9 @@ export function createFloatWidget(
   }
 
   /** Priority order (highest first):
-   *    error -> drag -> post-action (mobile) -> busy/generating ->
-   *    undo-after (desktop pin) -> hover (desktop) -> sleepy -> default
+   *    error -> drag -> post-action (mobile) -> cancel-armed ->
+   *    busy/generating -> undo-after (desktop pin) -> hover (desktop)
+   *    -> sleepy -> default
    *  Hover is gated on !isMobile so a spurious mouseenter on tap
    *  doesn't leak hover chibi to touch users. */
   function selectChibiUrl(): string {
@@ -170,6 +187,7 @@ export function createFloatWidget(
     if (dragActive) return CHIBI_ANGRY_URL;
     if (postActionState === "undone") return CHIBI_UNDO_AFTER_URL;
     if (postActionState === "done") return CHIBI_HOVER_HONE_URL;
+    if (armed === "cancel" && busy) return CHIBI_ERROR_URL;
     if (busy || generating) return CHIBI_THINKING_URL;
     if (undoAfterActive) return CHIBI_UNDO_AFTER_URL;
     if (!isMobile && isHovered && ready) {
@@ -186,6 +204,7 @@ export function createFloatWidget(
     if (dragActive) return "don't touch me!";
     if (postActionState === "undone") return "Undone :(";
     if (postActionState === "done") return "Done!";
+    if (armed === "cancel" && busy) return "Cancel?";
     if (busy || generating) return "Working~";
     if (undoAfterActive) return "Undone :(";
     if (!isMobile && isHovered && ready) {
@@ -220,9 +239,10 @@ export function createFloatWidget(
 
     offDragEnd = widget.onDragEnd(() => {
       clampWidgetPosition();
-      // Only start the angry linger if we actually crossed the drag
-      // threshold; onDragEnd fires for taps the framework classifies
-      // as sub-threshold drags, which shouldn't trigger angry.
+      // Only start the angry linger / persist the position if we
+      // actually crossed the drag threshold. onDragEnd fires for taps
+      // the framework classifies as sub-threshold drags, which would
+      // otherwise spam update-settings on every click.
       if (dragActive) {
         if (dragLingerTimer) clearTimeout(dragLingerTimer);
         dragLingerTimer = setTimeout(() => {
@@ -230,12 +250,17 @@ export function createFloatWidget(
           dragLingerTimer = null;
           render();
         }, DRAG_ANGRY_LINGER_MS);
+        const finalPos = widget.getPosition();
+        sendToBackend({
+          type: "update-settings",
+          settings: { floatWidgetX: finalPos.x, floatWidgetY: finalPos.y },
+        });
       }
     });
     clampWidgetPosition();
   }
 
-  buildWidget(currentSize);
+  buildWidget(currentSize, opts.initialPosition);
 
   /** Pull the widget back inside the viewport. Covers viewport
    *  shrink, off-bounds drags, and stale saved positions. */
@@ -265,28 +290,35 @@ export function createFloatWidget(
     render();
   }
 
-  function arm(action: "refine" | "undo") {
+  function arm(action: "refine" | "undo" | "cancel") {
     armed = action;
     clearArmedTimer();
+    const timeoutMs = action === "cancel" ? CANCEL_CONFIRM_TIMEOUT_MS : CONFIRM_TIMEOUT_MS;
     armedTimer = setTimeout(() => {
       if (armed === action) disarm();
-    }, CONFIRM_TIMEOUT_MS);
+    }, timeoutMs);
     render();
   }
 
   function render() {
-    const disabled = !ready || busy || generating;
-    const showSpinner = busy || generating;
-    const showUndo = !showSpinner && refined;
-    const showRefine = !showSpinner && !showUndo;
+    const cancellable = busy && !errorShowing;
+    const idle = !busy && !generating;
+    const interactive = ready && !errorShowing && (idle || cancellable);
+    const disabled = !interactive;
+    const showSpinner = (busy || generating) && !(armed === "cancel" && busy);
+    const showCancel = armed === "cancel" && busy;
+    const showUndo = !showSpinner && !showCancel && refined;
+    const showRefine = !showSpinner && !showCancel && !showUndo;
 
     btn.classList.toggle("hone-float-widget--lumia", lumiaMode);
-    btn.classList.toggle("hone-float-widget--disabled", disabled && !errorShowing && !showSpinner);
-    btn.classList.toggle("hone-float-widget--armed", armed !== null && !errorShowing && !showSpinner);
+    btn.classList.toggle("hone-float-widget--disabled", disabled && !errorShowing && !showSpinner && !showCancel);
+    btn.classList.toggle("hone-float-widget--armed", armed !== null && !errorShowing && !showSpinner && !showCancel);
+    btn.classList.toggle("hone-float-widget--armed-cancel", showCancel);
     btn.classList.toggle("hone-float-widget--busy", showSpinner);
-    btn.classList.toggle("hone-float-widget--refined", refined && !showSpinner);
+    btn.classList.toggle("hone-float-widget--refined", refined && !showSpinner && !showCancel);
     btn.classList.toggle("hone-float-widget--show-refine", showRefine);
     btn.classList.toggle("hone-float-widget--show-undo", showUndo);
+    btn.classList.toggle("hone-float-widget--show-cancel", showCancel);
 
     btn.setAttribute("aria-disabled", String(disabled));
 
@@ -301,8 +333,12 @@ export function createFloatWidget(
       ? "Hone is connecting to the backend..."
       : errorShowing
       ? "An error occurred, see the modal"
-      : (busy || generating)
-      ? busy ? "Honing..." : "Generating..."
+      : armed === "cancel"
+      ? "Tap again to cancel this generation"
+      : busy
+      ? "Honing... (tap to cancel)"
+      : generating
+      ? "Generating..."
       : armed === "refine"
       ? "Confirm?"
       : armed === "undo"
@@ -391,9 +427,29 @@ export function createFloatWidget(
     render();
   }
 
+  function fireCancel() {
+    clearArmedTimer();
+    armed = null;
+    busy = false;
+    pendingAction = null;
+    awaitingDiffClose = false;
+    clearUndoAfter();
+    sendToBackend({ type: "cancel-active" });
+    render();
+  }
+
   function activate() {
     if (!ready) return;
-    if (busy || generating) return;
+
+    if (busy) {
+      if (armed === "cancel") {
+        fireCancel();
+      } else {
+        arm("cancel");
+      }
+      return;
+    }
+    if (generating) return;
 
     const desired: "refine" | "undo" = refined ? "undo" : "refine";
 
@@ -607,7 +663,7 @@ export function createFloatWidget(
 
   function applySize(size: number) {
     // Clamp defensively against stale/hand-edited settings.
-    const clamped = Math.max(SIZE_MIN_PX, Math.min(SIZE_MAX_PX, Math.round(size)));
+    const clamped = clampSize(size);
     if (clamped === currentSize) return;
     recreateWidget(clamped);
   }
@@ -677,6 +733,10 @@ export function createFloatWidget(
       case "refine-complete":
       case "auto-refine-complete":
         busy = false;
+        if (armed === "cancel") {
+          armed = null;
+          clearArmedTimer();
+        }
         noteActivity();
         // Mobile-only: widget-initiated success fires the transient
         // Done!/Undone :( state. Refines wait for diff-modal close
@@ -708,6 +768,10 @@ export function createFloatWidget(
         busy = false;
         pendingAction = null;
         awaitingDiffClose = false;
+        if (armed === "cancel") {
+          armed = null;
+          clearArmedTimer();
+        }
         clearUndoAfter();
         // Don't noteActivity on error; the sleepy timer should
         // continue counting so a dismissed-and-walk-away user still
@@ -729,7 +793,7 @@ export function createFloatWidget(
 
       case "generation-state":
         generating = msg.generating;
-        if (generating) {
+        if (generating && armed !== null && armed !== "cancel") {
           armed = null;
           clearArmedTimer();
         }

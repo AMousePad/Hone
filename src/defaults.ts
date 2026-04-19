@@ -25,7 +25,9 @@ export const DEFAULT_SETTINGS: HoneSettings = {
   maxLorebookTokens: 50000,
   maxMessageContextTokens: 4000,
 
-  generationTimeoutSecs: 120,
+  streamGenerations: true,
+  ttftTimeoutSecs: 480,
+  totalTimeoutSecs: 900,
   minCharThreshold: 20,
 
   batchIntervalMs: 2000,
@@ -37,6 +39,8 @@ export const DEFAULT_SETTINGS: HoneSettings = {
   floatWidgetHidden: false,
   floatWidgetSize: 124,
   floatWidgetLumiaMode: true,
+  floatWidgetX: null,
+  floatWidgetY: null,
 
   debugLogging: false,
   debugLogMaxEntries: 2000,

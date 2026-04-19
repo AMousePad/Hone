@@ -3,3 +3,4 @@ export { makeToggleRow, makeSelectRow, makeNumberRow, makeTextRow, makeTextareaR
 export { makeSamplerSlider, SAMPLER_DEFS, type SamplerDef } from "./slider";
 export { makeConnectionSelect } from "./connection-select";
 export { createContextSettingsPanel } from "./context-panel";
+export { showInlineNotice } from "./inline-notice";
