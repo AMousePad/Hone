@@ -5,8 +5,12 @@ import * as hlog from "../../hlog";
 
 export const debugHandlers: HandlerMap = {
   async "get-debug-logs"(_msg, ctx) {
-    const formatted = hlog.formatLogs(ctx.userId);
     const stats = hlog.bufferStats(ctx.userId);
+    hlog.debug(
+      ctx.userId,
+      `ipc get-debug-logs: formatting ${stats.count}/${stats.capacity} entries (enabled=${stats.enabled})`
+    );
+    const formatted = hlog.formatLogs(ctx.userId);
     ctx.send({
       type: "debug-logs",
       formatted,
@@ -17,7 +21,9 @@ export const debugHandlers: HandlerMap = {
   },
 
   async "clear-debug-logs"(_msg, ctx) {
+    const before = hlog.bufferStats(ctx.userId);
     hlog.clearLogs(ctx.userId);
+    hlog.debug(ctx.userId, `ipc clear-debug-logs: cleared ${before.count}/${before.capacity} entries`);
     const stats = hlog.bufferStats(ctx.userId);
     ctx.send({
       type: "debug-logs",

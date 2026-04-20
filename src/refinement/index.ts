@@ -142,6 +142,10 @@ async function runRefineSingleBody(args: RefineSingleBodyInput): Promise<boolean
 
     const preset = await getPreset(userId, presetId);
     if (!preset) {
+      hlog.debug(
+        userId,
+        `refineSingle: active ${slotLabel} preset "${presetId}" not found, surfacing error to frontend`
+      );
       send({
         type: "refine-error",
         messageId,
@@ -149,7 +153,10 @@ async function runRefineSingleBody(args: RefineSingleBodyInput): Promise<boolean
       });
       return false;
     }
-    hlog.debug(userId, `refineSingle: slot=${slotLabel} preset="${preset.name}" strategy=${preset.strategy}`);
+    hlog.debug(
+      userId,
+      `refineSingle: slot=${slotLabel} preset="${preset.name}" strategy=${preset.strategy} prompts=${preset.prompts.length} head=${preset.headCollection.length} shield=${preset.shieldLiteralBlocks}`
+    );
 
     const shieldEnabled = preset.shieldLiteralBlocks && !isUserMessage;
     const include = preset.shieldConfig?.include?.length ? preset.shieldConfig.include : undefined;
@@ -471,9 +478,21 @@ export async function enhanceUserMessage(
     try {
       const messages = await spindle.chat.getMessages(chatId);
       const userMsg = [...messages].reverse().find((m) => m.role === "user");
-      if (userMsg) await refineSingle(chatId, userMsg.id, userId, send);
+      if (userMsg) {
+        hlog.debug(
+          userId,
+          `enhanceUserMessage: mode=post routing to refineSingle for user message ${userMsg.id.slice(0, 8)} swipe=${userMsg.swipe_id}`
+        );
+        await refineSingle(chatId, userMsg.id, userId, send);
+      } else {
+        hlog.debug(
+          userId,
+          `enhanceUserMessage: mode=post but chat ${chatId.slice(0, 8)} has no user message, no-op`
+        );
+      }
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
+      hlog.debug(userId, `enhanceUserMessage: mode=post threw: ${error}`);
       send({ type: "refine-error", messageId: "", error });
     }
     return;
@@ -486,6 +505,10 @@ export async function enhanceUserMessage(
   try {
     const preset = await getPreset(userId, settings.currentInputPresetId);
     if (!preset) {
+      hlog.debug(
+        userId,
+        `enhanceUserMessage: active input preset "${settings.currentInputPresetId}" not found, surfacing error to frontend`
+      );
       send({
         type: "refine-error",
         messageId: "",
@@ -493,7 +516,10 @@ export async function enhanceUserMessage(
       });
       return;
     }
-    hlog.debug(userId, `enhanceUserMessage: input preset="${preset.name}" strategy=${preset.strategy}`);
+    hlog.debug(
+      userId,
+      `enhanceUserMessage: input preset="${preset.name}" strategy=${preset.strategy} prompts=${preset.prompts.length} head=${preset.headCollection.length}`
+    );
 
     const model = await resolveModel(settings, userId);
     const chat = await spindle.chats.get(chatId, userId);
@@ -541,6 +567,10 @@ export async function enhanceUserMessage(
       return;
     }
 
+    hlog.debug(
+      userId,
+      `enhanceUserMessage: success requestId=${requestId} resultLen=${outcome.refinedText.length} strategy=${outcome.strategy}`
+    );
     send({ type: "enhance-result", text: outcome.refinedText, requestId });
   } catch (err) {
     if (isAbortError(err)) {
@@ -549,6 +579,8 @@ export async function enhanceUserMessage(
       return;
     }
     const error = err instanceof Error ? err.message : String(err);
+    hlog.debug(userId, `enhanceUserMessage: threw: ${error}`);
+    spindle.log.warn(`[Hone] enhance failed: ${error}`);
     send({ type: "refine-error", messageId: "", error });
   } finally {
     cancelRegistry.release(enhanceCancelKey, ownController);

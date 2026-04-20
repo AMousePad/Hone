@@ -43,6 +43,6 @@ export const DEFAULT_SETTINGS: HoneSettings = {
   floatWidgetY: null,
 
   debugLogging: false,
-  debugLogMaxEntries: 2000,
+  debugLogMaxEntries: 20000,
   debugLogFullPayloads: false,
 };

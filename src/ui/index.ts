@@ -271,6 +271,16 @@ export function setup(ctx: SpindleFrontendContext) {
           }).catch(() => {});
         }
         break;
+
+      case "host-version-warning":
+        ctx.ui.showConfirm({
+          title: "Update Lumiverse",
+          message: msg.message,
+          confirmLabel: "OK",
+          cancelLabel: "Dismiss",
+          variant: "warning",
+        }).catch(() => {});
+        break;
     }
   });
   cleanups.push(msgUnsub);

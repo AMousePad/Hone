@@ -19,6 +19,14 @@ function validateIpcMessage(raw) {
 
 // src/backend/permissions.ts
 var granted = new Set;
+var PERMISSION_PURPOSE = {
+  chat_mutation: "replace refined messages in the chat",
+  chats: "read the current chat and its messages",
+  characters: "resolve character fields like {{char}} during refinement",
+  world_books: "include activated lorebook entries as refinement context",
+  generation: "call your LLM connection to refine messages",
+  ui_panels: "render the Hone drawer tab and floating widget"
+};
 async function initPermissions() {
   try {
     const list = await spindle.permissions.getGranted();
@@ -41,6 +49,166 @@ async function initPermissions() {
 function hasPermission(p) {
   return granted.has(p);
 }
+function getMissingPermissions(required) {
+  return required.filter((p) => !granted.has(p));
+}
+function describeMissingPermissions(missing) {
+  if (missing.length === 0)
+    return "";
+  if (missing.length === 1) {
+    const p = missing[0];
+    const purpose = PERMISSION_PURPOSE[p] ?? p;
+    return `Hone is missing the '${p}' permission. It needs this to ${purpose}. Grant it in Lumiverse's Extensions tab, then try again.`;
+  }
+  const lines = missing.map((p) => `  \u2022 '${p}': ${PERMISSION_PURPOSE[p] ?? p}`);
+  return `Hone is missing ${missing.length} required permissions:
+${lines.join(`
+`)}
+Grant them in Lumiverse's Extensions tab, then try again.`;
+}
+// spindle.json
+var spindle_default = {
+  version: "0.2.1",
+  name: "Hone",
+  identifier: "hone",
+  author: "Mousepad",
+  github: "https://github.com/AMousePad/Hone",
+  homepage: "https://github.com/AMousePad/Hone",
+  description: "Refine AI responses and enhance user messages with configurable quality rules.",
+  permissions: [
+    "chat_mutation",
+    "chats",
+    "characters",
+    "world_books",
+    "generation",
+    "ui_panels"
+  ],
+  entry_backend: "dist/backend.js",
+  entry_frontend: "dist/frontend.js",
+  minimum_lumiverse_version: "0.9.2"
+};
+
+// src/constants.ts
+var HONE_VERSION = spindle_default.version;
+var HONE_MINIMUM_LUMIVERSE_VERSION = spindle_default.minimum_lumiverse_version;
+var DEFAULT_PROFILE_ID = "__default__";
+var HEAD_COLLECTION_ID = "__head__";
+
+// src/hlog.ts
+var DEFAULT_MAX_ENTRIES = 20000;
+var MIN_MAX_ENTRIES = 100;
+var MAX_MAX_ENTRIES = 20000;
+var lumiverseBackendVersion = null;
+var lumiverseFrontendVersion = null;
+function setHostVersions(backend, frontend) {
+  lumiverseBackendVersion = backend;
+  lumiverseFrontendVersion = frontend;
+}
+function makeRing(capacity) {
+  return { data: new Array(capacity).fill(null), head: 0, size: 0 };
+}
+function ringPush(buf, entry) {
+  const cap = buf.data.length;
+  if (buf.size < cap) {
+    buf.data[(buf.head + buf.size) % cap] = entry;
+    buf.size++;
+  } else {
+    buf.data[buf.head] = entry;
+    buf.head = (buf.head + 1) % cap;
+  }
+}
+function ringSnapshot(buf) {
+  const cap = buf.data.length;
+  const out = new Array(buf.size);
+  for (let i = 0;i < buf.size; i++) {
+    out[i] = buf.data[(buf.head + i) % cap];
+  }
+  return out;
+}
+function ringResize(buf, newCapacity) {
+  const live = ringSnapshot(buf);
+  const keep = live.length > newCapacity ? live.slice(live.length - newCapacity) : live;
+  const next = makeRing(newCapacity);
+  for (const entry of keep)
+    ringPush(next, entry);
+  return next;
+}
+function clampCapacity(raw) {
+  const n = typeof raw === "number" ? Math.floor(raw) : DEFAULT_MAX_ENTRIES;
+  return Math.max(MIN_MAX_ENTRIES, Math.min(MAX_MAX_ENTRIES, n));
+}
+var debugEnabledCache = new Map;
+var fullPayloadCache = new Map;
+var capacityCache = new Map;
+var buffers = new Map;
+function setDebugEnabled(userId, enabled, maxEntries, fullPayloads) {
+  const prev = debugEnabledCache.get(userId) || false;
+  debugEnabledCache.set(userId, enabled);
+  fullPayloadCache.set(userId, enabled && fullPayloads === true);
+  const newCap = clampCapacity(maxEntries);
+  const prevCap = capacityCache.get(userId);
+  capacityCache.set(userId, newCap);
+  if (prev && !enabled) {
+    buffers.delete(userId);
+    return;
+  }
+  if (!enabled)
+    return;
+  const existing = buffers.get(userId);
+  if (existing && prevCap !== newCap) {
+    buffers.set(userId, ringResize(existing, newCap));
+  }
+}
+function isFullPayloadEnabled(userId) {
+  return fullPayloadCache.get(userId) === true;
+}
+function debug(userId, msg) {
+  if (!debugEnabledCache.get(userId))
+    return;
+  let buf = buffers.get(userId);
+  if (!buf) {
+    buf = makeRing(capacityCache.get(userId) ?? DEFAULT_MAX_ENTRIES);
+    buffers.set(userId, buf);
+  }
+  ringPush(buf, { ts: Date.now(), msg });
+}
+function getLogs(userId) {
+  const buf = buffers.get(userId);
+  return buf ? ringSnapshot(buf) : [];
+}
+function formatLogs(userId) {
+  const entries = getLogs(userId);
+  const cap = capacityCache.get(userId) ?? DEFAULT_MAX_ENTRIES;
+  const lvBackend = lumiverseBackendVersion ?? "unknown";
+  const lvFrontend = lumiverseFrontendVersion ?? "unknown";
+  const header = `# Hone v${HONE_VERSION} | Lumiverse backend=${lvBackend} frontend=${lvFrontend} | entries=${entries.length}/${cap} | exportedAt=${new Date().toISOString()}`;
+  if (entries.length === 0)
+    return `${header}
+(no debug log entries)`;
+  const lines = new Array(entries.length + 1);
+  lines[0] = header;
+  for (let i = 0;i < entries.length; i++) {
+    const e = entries[i];
+    const d = new Date(e.ts);
+    const h = String(d.getHours()).padStart(2, "0");
+    const m = String(d.getMinutes()).padStart(2, "0");
+    const s = String(d.getSeconds()).padStart(2, "0");
+    const ms = String(d.getMilliseconds()).padStart(3, "0");
+    lines[i + 1] = `[${h}:${m}:${s}.${ms}] ${e.msg}`;
+  }
+  return lines.join(`
+`);
+}
+function clearLogs(userId) {
+  buffers.delete(userId);
+}
+function bufferStats(userId) {
+  return {
+    count: buffers.get(userId)?.size ?? 0,
+    capacity: capacityCache.get(userId) ?? DEFAULT_MAX_ENTRIES,
+    enabled: debugEnabledCache.get(userId) === true
+  };
+}
 
 // src/backend/safe-event.ts
 function safeEvent(eventName, handler) {
@@ -53,6 +221,7 @@ function safeEvent(eventName, handler) {
       await handler(payload, userId);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      debug(userId, `safeEvent[${eventName}]: handler threw: ${message}`);
       spindle.log.warn(`[Hone] ${eventName} handler failed: ${message}`);
     }
   };
@@ -3828,10 +3997,6 @@ var BUILTIN_PRESETS = [
 var DEFAULT_ACTIVE_PRESET_ID = SIMULACRA_V4_ID;
 var DEFAULT_INPUT_ACTIVE_PRESET_ID = INPUT_SINGLE_DEFAULT_ID;
 
-// src/constants.ts
-var DEFAULT_PROFILE_ID = "__default__";
-var HEAD_COLLECTION_ID = "__head__";
-
 // src/storage/user-storage.ts
 var SAFE_ID = /^[a-z0-9][a-z0-9._-]{0,127}$/;
 function isSafeId(id) {
@@ -3858,110 +4023,6 @@ async function listUnder(prefix, userId) {
   } catch {
     return [];
   }
-}
-
-// src/hlog.ts
-var DEFAULT_MAX_ENTRIES = 2000;
-var MIN_MAX_ENTRIES = 100;
-var MAX_MAX_ENTRIES = 20000;
-function makeRing(capacity) {
-  return { data: new Array(capacity).fill(null), head: 0, size: 0 };
-}
-function ringPush(buf, entry) {
-  const cap = buf.data.length;
-  if (buf.size < cap) {
-    buf.data[(buf.head + buf.size) % cap] = entry;
-    buf.size++;
-  } else {
-    buf.data[buf.head] = entry;
-    buf.head = (buf.head + 1) % cap;
-  }
-}
-function ringSnapshot(buf) {
-  const cap = buf.data.length;
-  const out = new Array(buf.size);
-  for (let i = 0;i < buf.size; i++) {
-    out[i] = buf.data[(buf.head + i) % cap];
-  }
-  return out;
-}
-function ringResize(buf, newCapacity) {
-  const live = ringSnapshot(buf);
-  const keep = live.length > newCapacity ? live.slice(live.length - newCapacity) : live;
-  const next = makeRing(newCapacity);
-  for (const entry of keep)
-    ringPush(next, entry);
-  return next;
-}
-function clampCapacity(raw) {
-  const n = typeof raw === "number" ? Math.floor(raw) : DEFAULT_MAX_ENTRIES;
-  return Math.max(MIN_MAX_ENTRIES, Math.min(MAX_MAX_ENTRIES, n));
-}
-var debugEnabledCache = new Map;
-var fullPayloadCache = new Map;
-var capacityCache = new Map;
-var buffers = new Map;
-function setDebugEnabled(userId, enabled, maxEntries, fullPayloads) {
-  const prev = debugEnabledCache.get(userId) || false;
-  debugEnabledCache.set(userId, enabled);
-  fullPayloadCache.set(userId, enabled && fullPayloads === true);
-  const newCap = clampCapacity(maxEntries);
-  const prevCap = capacityCache.get(userId);
-  capacityCache.set(userId, newCap);
-  if (prev && !enabled) {
-    buffers.delete(userId);
-    return;
-  }
-  if (!enabled)
-    return;
-  const existing = buffers.get(userId);
-  if (existing && prevCap !== newCap) {
-    buffers.set(userId, ringResize(existing, newCap));
-  }
-}
-function isFullPayloadEnabled(userId) {
-  return fullPayloadCache.get(userId) === true;
-}
-function debug(userId, msg) {
-  if (!debugEnabledCache.get(userId))
-    return;
-  let buf = buffers.get(userId);
-  if (!buf) {
-    buf = makeRing(capacityCache.get(userId) ?? DEFAULT_MAX_ENTRIES);
-    buffers.set(userId, buf);
-  }
-  ringPush(buf, { ts: Date.now(), msg });
-}
-function getLogs(userId) {
-  const buf = buffers.get(userId);
-  return buf ? ringSnapshot(buf) : [];
-}
-function formatLogs(userId) {
-  const entries = getLogs(userId);
-  if (entries.length === 0)
-    return "(no debug log entries)";
-  const lines = new Array(entries.length);
-  for (let i = 0;i < entries.length; i++) {
-    const e = entries[i];
-    const d = new Date(e.ts);
-    const h = String(d.getHours()).padStart(2, "0");
-    const m = String(d.getMinutes()).padStart(2, "0");
-    const s = String(d.getSeconds()).padStart(2, "0");
-    const ms = String(d.getMilliseconds()).padStart(3, "0");
-    lines[i] = `[${h}:${m}:${s}.${ms}] ${e.msg}`;
-  }
-  return lines.join(`
-`);
-}
-function clearLogs(userId) {
-  buffers.delete(userId);
-}
-function bufferStats(userId) {
-  return {
-    count: buffers.get(userId)?.size ?? 0,
-    capacity: capacityCache.get(userId) ?? DEFAULT_MAX_ENTRIES,
-    enabled: debugEnabledCache.get(userId) === true
-  };
 }
 
 // src/resources/resource-service.ts
@@ -4009,19 +4070,28 @@ function createResourceService(cfg) {
     async list(userId) {
       const summaries = cfg.builtIns.map((b) => cfg.summarize(b, true));
       const customs = [];
-      for (const id of await listCustomIds(userId)) {
+      const customIds = await listCustomIds(userId);
+      let skipped = 0;
+      for (const id of customIds) {
         const item = await loadCustom(userId, id);
         if (item)
           customs.push(cfg.summarize(item, false));
+        else
+          skipped++;
       }
       customs.sort((a, b) => a.name.localeCompare(b.name));
+      debug(userId, `${cfg.kind}: list -> ${customs.length} custom (+${summaries.length} built-in)${skipped > 0 ? `, ${skipped} custom id(s) failed to load` : ""}`);
       return [...customs, ...summaries];
     },
     async get(userId, id) {
       const builtIn = cfg.builtIns.find((b) => b.id === id);
-      if (builtIn)
+      if (builtIn) {
+        debug(userId, `${cfg.kind}: get "${id}" -> built-in hit`);
         return builtIn;
-      return loadCustom(userId, id);
+      }
+      const loaded = await loadCustom(userId, id);
+      debug(userId, `${cfg.kind}: get "${id}" -> ${loaded ? "custom hit" : "miss"}`);
+      return loaded;
     },
     getBuiltIn(id) {
       return cfg.builtIns.find((b) => b.id === id) ?? null;
@@ -4031,27 +4101,34 @@ function createResourceService(cfg) {
     },
     async save(userId, item) {
       if (builtInIds.has(item.id)) {
+        debug(userId, `${cfg.kind}: save "${item.id}" rejected (built-in)`);
         throw new Error(`Cannot overwrite built-in ${cfg.kind} "${item.id}"`);
       }
       assertSafeId(item.id);
       cfg.validateSave?.(item);
       await setJson(pathFor(item.id), item, userId);
+      debug(userId, `${cfg.kind}: save "${item.id}" -> persisted`);
     },
     async delete(userId, id) {
       if (builtInIds.has(id)) {
+        debug(userId, `${cfg.kind}: delete "${id}" rejected (built-in)`);
         throw new Error(`Cannot delete built-in ${cfg.kind} "${id}"`);
       }
       assertSafeId(id);
       await deletePath(pathFor(id), userId);
+      debug(userId, `${cfg.kind}: delete "${id}" -> removed`);
     },
     async duplicate(userId, sourceId) {
       const source = await this.get(userId, sourceId);
-      if (!source)
+      if (!source) {
+        debug(userId, `${cfg.kind}: duplicate "${sourceId}" -> source not found`);
         throw new Error(`${cfg.kind} "${sourceId}" not found`);
+      }
       const newName = `${source.name} (Copy)`;
       const newId = await uniqueId(userId, newName);
       const copy = cfg.buildCopy(source, newId, newName);
       await this.save(userId, copy);
+      debug(userId, `${cfg.kind}: duplicate "${sourceId}" -> new id "${newId}"`);
       return copy;
     },
     async exists(userId, id) {
@@ -4177,7 +4254,7 @@ var DEFAULT_SETTINGS = {
   floatWidgetX: null,
   floatWidgetY: null,
   debugLogging: false,
-  debugLogMaxEntries: 2000,
+  debugLogMaxEntries: 20000,
   debugLogFullPayloads: false
 };
 
@@ -4223,9 +4300,11 @@ async function loadSettings(userId) {
     fallback: {},
     userId
   });
+  const keys = stored ? Object.keys(stored) : [];
   const merged = mergeSettingsWithDefaults(DEFAULT_SETTINGS, stored ?? {});
   cacheByUser.set(userId, merged);
   setDebugEnabled(userId, merged.debugLogging, merged.debugLogMaxEntries, merged.debugLogFullPayloads);
+  debug(userId, `loadSettings: storedKeys=${keys.length} (${keys.join(",") || "(empty)"}) activeModelProfileId="${merged.activeModelProfileId}" presets=[output=${merged.currentPresetId},input=${merged.currentInputPresetId}] debug=${merged.debugLogging}/${merged.debugLogMaxEntries}`);
   return merged;
 }
 async function getSettings(userId) {
@@ -4244,6 +4323,16 @@ async function updateSettings(userId, partial) {
   await enqueueUserOperation(userId, async () => {
     const current = await getSettings(userId);
     const updated = mergeSettingsWithDefaults(current, partial);
+    const changedKeys = [];
+    for (const k of Object.keys(partial)) {
+      if (JSON.stringify(current[k]) !== JSON.stringify(updated[k]))
+        changedKeys.push(k);
+    }
+    if (changedKeys.length > 0) {
+      debug(userId, `updateSettings: persisting ${changedKeys.length} changed key(s): ${changedKeys.join(",")}`);
+    } else {
+      debug(userId, `updateSettings: no-op (requested keys matched current values: ${Object.keys(partial).join(",") || "(empty)"})`);
+    }
     await persist(userId, updated);
     result = updated;
   });
@@ -4760,8 +4849,10 @@ async function saveUndo(userId, chatId, messageId, swipeId, entry) {
     const evicted = index.queue.shift();
     try {
       await removeSwipeSlot(userId, chatId, evicted.m, evicted.s);
+      debug(userId, `saveUndo: evicted ${evicted.m.slice(0, 8)}/${evicted.s} (queue over ${MAX_UNDO_PER_CHAT})`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      debug(userId, `saveUndo: evict threw for ${evicted.m.slice(0, 8)}/${evicted.s}: ${message}, continuing`);
       spindle.log.warn(`[Hone] saveUndo: failed to evict ${evicted.m.slice(0, 8)}/${evicted.s} during prune: ${message}; continuing`);
     }
   }
@@ -4835,17 +4926,23 @@ var DEFAULT_STATS = {
   byStrategy: {}
 };
 async function getStats(userId, chatId) {
-  return spindle.userStorage.getJson(statsFile(chatId), {
+  const stats = await spindle.userStorage.getJson(statsFile(chatId), {
     fallback: { ...DEFAULT_STATS },
     userId
   });
+  debug(userId, `getStats: chat=${chatId.slice(0, 8)} messagesRefined=${stats.messagesRefined} totalRefinements=${stats.totalRefinements}`);
+  return stats;
 }
 async function incrementStats(userId, chatId, strategy, count = 1) {
-  const stats = await getStats(userId, chatId);
+  const stats = await spindle.userStorage.getJson(statsFile(chatId), {
+    fallback: { ...DEFAULT_STATS },
+    userId
+  });
   stats.messagesRefined += count;
   stats.totalRefinements += count;
   stats.byStrategy[strategy] = (stats.byStrategy[strategy] || 0) + count;
   await spindle.userStorage.setJson(statsFile(chatId), stats, { userId });
+  debug(userId, `incrementStats: chat=${chatId.slice(0, 8)} strategy="${strategy}" +${count} -> totalRefinements=${stats.totalRefinements} strategyCount=${stats.byStrategy[strategy]}`);
 }
 
 // src/assemble.ts
@@ -5183,21 +5280,43 @@ function buildGenerationParameters(params) {
   return Object.keys(result).length > 0 ? result : undefined;
 }
 async function resolveConnection(connectionProfileId, userId) {
+  if (!hasPermission("generation")) {
+    const reminder = describeMissingPermissions(["generation"]);
+    debug(userId, `resolveConnection: 'generation' permission missing at call time, returning reminder`);
+    return { ok: false, error: reminder };
+  }
   try {
     if (connectionProfileId) {
+      debug(userId, `resolveConnection: explicit id="${connectionProfileId}" -> spindle.connections.get`);
       const conn2 = await spindle.connections.get(connectionProfileId, userId);
-      if (!conn2)
-        return null;
-      return { id: conn2.id, model: conn2.model || undefined };
+      if (!conn2) {
+        debug(userId, `resolveConnection: explicit id="${connectionProfileId}" not found (spindle.connections.get returned null)`);
+        return { ok: false, error: `Connection profile "${connectionProfileId}" not found` };
+      }
+      debug(userId, `resolveConnection: explicit id="${connectionProfileId}" -> hit name="${conn2.name}" provider="${conn2.provider || ""}" model="${conn2.model || ""}"`);
+      return { ok: true, value: { id: conn2.id, model: conn2.model || undefined } };
     }
+    debug(userId, `resolveConnection: no explicit id, falling back to spindle.connections.list (default)`);
     const conns = await spindle.connections.list(userId);
-    if (!conns || conns.length === 0)
-      return null;
+    if (!conns || conns.length === 0) {
+      debug(userId, `resolveConnection: default fallback failed - spindle.connections.list returned ${conns === null ? "null" : conns === undefined ? "undefined" : "empty array"}. User has no Lumiverse connection profiles`);
+      return {
+        ok: false,
+        error: "No connection profiles configured. Set a default in Lumiverse Settings -> Connections"
+      };
+    }
     const conn = conns.find((c) => c.is_default) || conns[0];
-    return { id: conn.id, model: conn.model || undefined };
+    const via = conns.find((c) => c.is_default) ? "is_default" : "first";
+    debug(userId, `resolveConnection: default fallback -> ${conns.length} connection(s), picked "${conn.name}" via ${via} (provider="${conn.provider || ""}" model="${conn.model || ""}")`);
+    return { ok: true, value: { id: conn.id, model: conn.model || undefined } };
   } catch (err) {
-    spindle.log.warn(`resolveConnection failed: ${err instanceof Error ? err.message : err}`);
-    return null;
+    const message = err instanceof Error ? err.message : String(err);
+    debug(userId, `resolveConnection: threw for id="${connectionProfileId || "(default)"}": ${message}`);
+    spindle.log.warn(`resolveConnection failed: ${message}`);
+    if (message.includes("PERMISSION_DENIED") && message.includes("generation")) {
+      return { ok: false, error: describeMissingPermissions(["generation"]) };
+    }
+    return { ok: false, error: `Connection lookup failed: ${message}` };
   }
 }
 function pickStallMessage(streamMode, settings) {
@@ -5242,39 +5361,49 @@ function buildSpindleRequest(req, resolved, userId, signal) {
   };
 }
 async function prepareRequest(req, userId) {
+  debug(userId, `prepareRequest: start connectionProfileId="${req.connectionProfileId || "(default)"}" msgs=${req.messages.length} params=${JSON.stringify(req.parameters ?? {})}`);
   const resolved = await resolveConnection(req.connectionProfileId, userId);
-  if (!resolved) {
-    const reason = req.connectionProfileId ? `Connection profile "${req.connectionProfileId}" not found` : "No connection profiles configured. Set a default in Lumiverse Settings -> Connections";
-    spindle.log.warn(`Generation failed: ${reason}`);
-    return { ok: false, error: reason };
+  if (!resolved.ok) {
+    debug(userId, `prepareRequest: resolveConnection failed, surfacing error to frontend: ${resolved.error}`);
+    spindle.log.warn(`Generation failed: ${resolved.error}`);
+    return { ok: false, error: resolved.error };
   }
   const parametersForLog = { ...req.parameters };
-  if (resolved.model)
-    parametersForLog.model = resolved.model;
-  return { ok: true, data: { resolved, parametersForLog } };
+  if (resolved.value.model)
+    parametersForLog.model = resolved.value.model;
+  debug(userId, `prepareRequest: resolved connection.id=${resolved.value.id} model="${resolved.value.model || "none"}"`);
+  return { ok: true, data: { resolved: resolved.value, parametersForLog } };
 }
 async function generateNonStreaming(req, resolved, userId, options, settings) {
   const totalMs = Math.max(1, settings.totalTimeoutSecs) * 1000;
   const outcome = { ourTimeoutFired: false };
   const { signal, disarm } = composeAbortSignals(options.signal, totalMs, outcome);
+  const startedAt = Date.now();
+  debug(userId, `generateNonStreaming: dispatching spindle.generate.raw (totalTimeout=${totalMs}ms)`);
   try {
     const request = buildSpindleRequest(req, resolved, userId, signal);
     const result = await spindle.generate.raw(request);
     const content = result?.content ?? "";
+    const elapsed = Date.now() - startedAt;
+    debug(userId, `generateNonStreaming: success contentLen=${content.length} elapsed=${elapsed}ms`);
     if (isFullPayloadEnabled(userId)) {
       debug(userId, `Generation response: ${safeStringify(result)}`);
     }
     return { content, success: true };
   } catch (err) {
+    const elapsed = Date.now() - startedAt;
     if (isAbortError(err)) {
       if (options.signal?.aborted && !outcome.ourTimeoutFired) {
+        debug(userId, `generateNonStreaming: external abort after ${elapsed}ms`);
         return { content: "", success: false, error: "ABORTED", aborted: true };
       }
       const message2 = pickStallMessage(false, settings);
+      debug(userId, `generateNonStreaming: own timeout fired after ${elapsed}ms -> ${message2}`);
       spindle.log.warn(`Generation failed: ${message2}`);
       return { content: "", success: false, error: message2 };
     }
     const message = err instanceof Error ? err.message : String(err);
+    debug(userId, `generateNonStreaming: threw after ${elapsed}ms: ${message}`);
     spindle.log.warn(`Generation failed: ${message}`);
     return { content: "", success: false, error: message };
   } finally {
@@ -5288,6 +5417,11 @@ async function generateStreaming(req, resolved, userId, options, settings) {
   let firstTokenSeen = false;
   let aggregated = "";
   let receivedDone = false;
+  let tokenChunks = 0;
+  let reasoningChunks = 0;
+  let firstTokenElapsed = -1;
+  const startedAt = Date.now();
+  debug(userId, `generateStreaming: opening spindle.generate.rawStream (ttftTimeout=${ttftMs}ms)`);
   try {
     const request = buildSpindleRequest(req, resolved, userId, signal);
     const stream = spindle.generate.rawStream(request);
@@ -5295,20 +5429,31 @@ async function generateStreaming(req, resolved, userId, options, settings) {
       if (chunk.type === "token" || chunk.type === "reasoning") {
         if (!firstTokenSeen) {
           firstTokenSeen = true;
+          firstTokenElapsed = Date.now() - startedAt;
           disarmTtft();
+          debug(userId, `generateStreaming: first ${chunk.type} chunk after ${firstTokenElapsed}ms, TTFT disarmed`);
         }
-        if (chunk.type === "token")
+        if (chunk.type === "token") {
           aggregated += chunk.token;
+          tokenChunks++;
+        } else {
+          reasoningChunks++;
+        }
       } else if (chunk.type === "done") {
         receivedDone = true;
+        const beforeLen = aggregated.length;
         aggregated = chunk.content ?? aggregated;
+        const totalElapsed2 = Date.now() - startedAt;
+        debug(userId, `generateStreaming: done chunk (tokens=${tokenChunks} reasoning=${reasoningChunks} aggregatedLen=${beforeLen} -> ${aggregated.length} ttft=${firstTokenElapsed}ms total=${totalElapsed2}ms)`);
         if (isFullPayloadEnabled(userId)) {
           debug(userId, `Generation stream done: ${safeStringify(chunk)}`);
         }
         return { content: aggregated, success: true };
       }
     }
+    const totalElapsed = Date.now() - startedAt;
     if (!receivedDone) {
+      debug(userId, `generateStreaming: stream ended with no done chunk (tokens=${tokenChunks} reasoning=${reasoningChunks} aggregatedLen=${aggregated.length} elapsed=${totalElapsed}ms)`);
       spindle.log.warn(`Generation stream ended without a 'done' chunk (got ${aggregated.length} chars)`);
       return {
         content: "",
@@ -5316,17 +5461,22 @@ async function generateStreaming(req, resolved, userId, options, settings) {
         error: "Stream ended without a completion marker"
       };
     }
+    debug(userId, `generateStreaming: loop exited cleanly (tokens=${tokenChunks} aggregatedLen=${aggregated.length} elapsed=${totalElapsed}ms)`);
     return { content: aggregated, success: true };
   } catch (err) {
+    const elapsed = Date.now() - startedAt;
     if (isAbortError(err)) {
       if (options.signal?.aborted && !outcome.ourTimeoutFired) {
+        debug(userId, `generateStreaming: external abort after ${elapsed}ms (tokens=${tokenChunks} firstTokenSeen=${firstTokenSeen})`);
         return { content: "", success: false, error: "ABORTED", aborted: true };
       }
       const message2 = pickStallMessage(true, settings);
+      debug(userId, `generateStreaming: TTFT timeout after ${elapsed}ms (tokens=${tokenChunks} firstTokenSeen=${firstTokenSeen}) -> ${message2}`);
       spindle.log.warn(`Generation failed: ${message2}`);
       return { content: "", success: false, error: message2 };
     }
     const message = err instanceof Error ? err.message : String(err);
+    debug(userId, `generateStreaming: threw after ${elapsed}ms (tokens=${tokenChunks} firstTokenSeen=${firstTokenSeen}): ${message}`);
     spindle.log.warn(`Generation failed: ${message}`);
     return { content: "", success: false, error: message };
   } finally {
@@ -5336,14 +5486,18 @@ async function generateStreaming(req, resolved, userId, options, settings) {
 async function generate(req, userId, options = {}) {
   const settings = await getSettings(userId);
   const prepared = await prepareRequest(req, userId);
-  if (!prepared.ok)
+  if (!prepared.ok) {
+    debug(userId, `generate: aborting before dispatch - ${prepared.error}`);
     return { content: "", success: false, error: prepared.error };
+  }
   const { resolved, parametersForLog } = prepared.data;
   debug(userId, `Generation: connection=${resolved.id}${req.connectionProfileId ? "" : " (default)"}, model=${resolved.model || "none"}, msgs=${req.messages.length}, streaming=${settings.streamGenerations}, params=${JSON.stringify(parametersForLog)}`);
   if (isFullPayloadEnabled(userId)) {
     debug(userId, `Generation request messages: ${safeStringify(req.messages)}`);
   }
-  return settings.streamGenerations ? generateStreaming(req, resolved, userId, options, settings) : generateNonStreaming(req, resolved, userId, options, settings);
+  const result = settings.streamGenerations ? await generateStreaming(req, resolved, userId, options, settings) : await generateNonStreaming(req, resolved, userId, options, settings);
+  debug(userId, `generate: done success=${result.success} aborted=${!!result.aborted} contentLen=${result.content.length}${result.error ? ` error="${result.error}"` : ""}`);
+  return result;
 }
 
 // src/refinement/model-resolver.ts
@@ -5351,26 +5505,30 @@ async function resolveProfile(profileId, userId, onMissingClear) {
   let profile;
   if (!profileId || profileId === DEFAULT_PROFILE_ID) {
     profile = getDefaultProfile();
+    debug(userId, `resolveProfile: id="${profileId || ""}" is default/empty -> virtual Default profile`);
   } else {
     const loaded = await getModelProfile(userId, profileId);
     if (loaded) {
       profile = loaded;
     } else {
       profile = getDefaultProfile();
+      debug(userId, `resolveProfile: id="${profileId}" no longer exists, falling back to Default${onMissingClear ? " and clearing activeModelProfileId" : ""}`);
       spindle.log.warn(`[Hone] model profile "${profileId}" no longer exists; falling back to Default`);
       if (onMissingClear)
         await onMissingClear();
     }
   }
-  debug(userId, `resolveProfile: id="${profileId || "(default)"}" -> "${profile.name}" connection="${profile.connectionProfileId || "(default)"}" reasoning=${JSON.stringify(profile.reasoning)}`);
+  const parameters = buildGenerationParameters(profile.samplers);
+  debug(userId, `resolveProfile: id="${profileId || "(default)"}" -> "${profile.name}" connection="${profile.connectionProfileId || "(default)"}" samplers=${JSON.stringify(parameters ?? {})} reasoning=${JSON.stringify(profile.reasoning)}`);
   return {
     connectionProfileId: profile.connectionProfileId,
-    parameters: buildGenerationParameters(profile.samplers),
+    parameters,
     reasoning: profile.reasoning
   };
 }
 async function resolveModel(settings, userId) {
   return resolveProfile(settings.activeModelProfileId, userId, async () => {
+    debug(userId, `resolveModel: clearing dangling activeModelProfileId -> DEFAULT_PROFILE_ID`);
     await updateSettings(userId, { activeModelProfileId: DEFAULT_PROFILE_ID });
   });
 }
@@ -5510,11 +5668,17 @@ async function runPipeline(pipeline, input, initialLatest, proposals, emitStages
     const result = await generate(req, input.userId, { signal: input.signal });
     if (!result.success) {
       if (result.aborted) {
+        debug(input.userId, `runPipeline stage ${i + 1} "${stage.name}": aborted, propagating`);
         throw makeAbortError(result.error || "ABORTED");
       }
+      debug(input.userId, `runPipeline stage ${i + 1} "${stage.name}": generate failed: ${result.error || "(no error)"}`);
       throw new Error(result.error || `Stage "${stage.name}" failed`);
     }
-    const rawContent = stageModel.reasoning.stripCoTTags ? removeCoTTags(result.content) : result.content;
+    const stripCoT = stageModel.reasoning.stripCoTTags;
+    const rawContent = stripCoT ? removeCoTTags(result.content) : result.content;
+    if (stripCoT && rawContent.length !== result.content.length) {
+      debug(input.userId, `runPipeline stage ${i + 1} "${stage.name}": stripped CoT tags ${result.content.length} -> ${rawContent.length}`);
+    }
     const extracted = extractRefinedContent(rawContent);
     if (!extracted.ok) {
       debug(input.userId, `stage "${stage.name}": output-format failure "${extracted.reason}": ${extracted.message}`);
@@ -5522,6 +5686,7 @@ async function runPipeline(pipeline, input, initialLatest, proposals, emitStages
     }
     for (const r of extracted.recoveries)
       debug(input.userId, `stage "${stage.name}": ${r}`);
+    debug(input.userId, `runPipeline stage ${i + 1} "${stage.name}": extracted content len=${extracted.content.length} (raw=${rawContent.length})`);
     latest = extracted.content;
     if (emitStages) {
       const record = { index: i, name: stage.name, text: latest, kind: "step" };
@@ -5577,15 +5742,20 @@ async function runParallel(input) {
   };
 }
 async function runStrategy(input) {
-  debug(input.userId, `runStrategy: preset="${input.preset.name}" strategy=${input.preset.strategy} messageLen=${input.messageText.length} latestLen=${input.latest.length} contextLen=${input.context.length}`);
-  if (input.preset.strategy === "parallel")
-    return runParallel(input);
+  const startedAt = Date.now();
+  debug(input.userId, `runStrategy: preset="${input.preset.name}" strategy=${input.preset.strategy} messageLen=${input.messageText.length} latestLen=${input.latest.length} contextLen=${input.context.length} loreLen=${input.loreBlock.length} povLen=${input.pov.length}`);
+  if (input.preset.strategy === "parallel") {
+    const out = await runParallel(input);
+    debug(input.userId, `runStrategy: parallel complete: finalLen=${out.refinedText.length} stages=${out.stages.length} elapsed=${Date.now() - startedAt}ms`);
+    return out;
+  }
   if (!input.preset.pipeline) {
+    debug(input.userId, `runStrategy: preset "${input.preset.id}" has strategy=pipeline but no pipeline configured`);
     throw new Error(`Preset "${input.preset.id}" has strategy=pipeline but no pipeline configured`);
   }
   debug(input.userId, `runStrategy: executing pipeline with ${input.preset.pipeline.stages.length} stages`);
   const run = await runPipeline(input.preset.pipeline, input, input.latest, undefined, true);
-  debug(input.userId, `runStrategy: pipeline complete: finalLen=${run.finalText.length} stages=${run.stages.length}`);
+  debug(input.userId, `runStrategy: pipeline complete: finalLen=${run.finalText.length} stages=${run.stages.length} elapsed=${Date.now() - startedAt}ms`);
   return { refinedText: run.finalText, stages: run.stages, strategy: "pipeline" };
 }
 
@@ -5759,6 +5929,7 @@ async function runRefineSingleBody(args) {
     const stageResults = [];
     const preset = await getPreset(userId, presetId);
     if (!preset) {
+      debug(userId, `refineSingle: active ${slotLabel} preset "${presetId}" not found, surfacing error to frontend`);
       send({
         type: "refine-error",
         messageId,
@@ -5766,7 +5937,7 @@ async function runRefineSingleBody(args) {
       });
       return false;
     }
-    debug(userId, `refineSingle: slot=${slotLabel} preset="${preset.name}" strategy=${preset.strategy}`);
+    debug(userId, `refineSingle: slot=${slotLabel} preset="${preset.name}" strategy=${preset.strategy} prompts=${preset.prompts.length} head=${preset.headCollection.length} shield=${preset.shieldLiteralBlocks}`);
     const shieldEnabled = preset.shieldLiteralBlocks && !isUserMessage;
     const include = preset.shieldConfig?.include?.length ? preset.shieldConfig.include : undefined;
     const exclude = preset.shieldConfig?.exclude?.length ? preset.shieldConfig.exclude : undefined;
@@ -6015,10 +6186,15 @@ async function enhanceUserMessage(text, chatId, userId, mode, requestId, send) {
     try {
       const messages = await spindle.chat.getMessages(chatId);
       const userMsg = [...messages].reverse().find((m) => m.role === "user");
-      if (userMsg)
+      if (userMsg) {
+        debug(userId, `enhanceUserMessage: mode=post routing to refineSingle for user message ${userMsg.id.slice(0, 8)} swipe=${userMsg.swipe_id}`);
         await refineSingle(chatId, userMsg.id, userId, send);
+      } else {
+        debug(userId, `enhanceUserMessage: mode=post but chat ${chatId.slice(0, 8)} has no user message, no-op`);
+      }
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
+      debug(userId, `enhanceUserMessage: mode=post threw: ${error}`);
       send({ type: "refine-error", messageId: "", error });
     }
     return;
@@ -6029,6 +6205,7 @@ async function enhanceUserMessage(text, chatId, userId, mode, requestId, send) {
   try {
     const preset = await getPreset(userId, settings.currentInputPresetId);
     if (!preset) {
+      debug(userId, `enhanceUserMessage: active input preset "${settings.currentInputPresetId}" not found, surfacing error to frontend`);
       send({
         type: "refine-error",
         messageId: "",
@@ -6036,7 +6213,7 @@ async function enhanceUserMessage(text, chatId, userId, mode, requestId, send) {
       });
       return;
     }
-    debug(userId, `enhanceUserMessage: input preset="${preset.name}" strategy=${preset.strategy}`);
+    debug(userId, `enhanceUserMessage: input preset="${preset.name}" strategy=${preset.strategy} prompts=${preset.prompts.length} head=${preset.headCollection.length}`);
     const model = await resolveModel(settings, userId);
     const chat = await spindle.chats.get(chatId, userId);
     const characterId = chat?.character_id || undefined;
@@ -6070,6 +6247,7 @@ async function enhanceUserMessage(text, chatId, userId, mode, requestId, send) {
       send({ type: "refine-error", messageId: "", error: ABORTED_ERROR_MARKER });
       return;
     }
+    debug(userId, `enhanceUserMessage: success requestId=${requestId} resultLen=${outcome.refinedText.length} strategy=${outcome.strategy}`);
     send({ type: "enhance-result", text: outcome.refinedText, requestId });
   } catch (err) {
     if (isAbortError(err)) {
@@ -6078,6 +6256,8 @@ async function enhanceUserMessage(text, chatId, userId, mode, requestId, send) {
       return;
     }
     const error = err instanceof Error ? err.message : String(err);
+    debug(userId, `enhanceUserMessage: threw: ${error}`);
+    spindle.log.warn(`[Hone] enhance failed: ${error}`);
     send({ type: "refine-error", messageId: "", error });
   } finally {
     release(enhanceCancelKey, ownController);
@@ -6142,9 +6322,12 @@ async function previewStage(preset, stage, stageIndex, totalStages, userId, prop
 async function getActiveChatIdFor(userId) {
   try {
     const active = await spindle.chats.getActive(userId);
-    return active?.id || null;
+    const id = active?.id || null;
+    debug(userId, `getActiveChatIdFor: spindle.chats.getActive -> ${id ? id.slice(0, 8) : "null"}`);
+    return id;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    debug(userId, `getActiveChatIdFor: spindle.chats.getActive threw: ${message}`);
     spindle.log.warn(`getActiveChatIdFor(${userId}) failed: ${message}`);
     return null;
   }
@@ -6177,6 +6360,7 @@ async function snapshotLastAiState(userId, chatId) {
     return { messageId: lastAssistant.id, refined: true, stages, refinedMessageIds };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    debug(userId, `snapshotLastAiState(${chatId.slice(0, 8)}): threw: ${message}`);
     spindle.log.warn(`snapshotLastAiState(${userId}, ${chatId}) failed: ${message}`);
     return { messageId: null, refined: false, refinedMessageIds: [] };
   }
@@ -6265,20 +6449,32 @@ function registerEvents(sendTo) {
     debug(userId, `GENERATION_ENDED ${id} (active=${activeGenerationsByUser.get(userId)?.size ?? 0})`);
     publishGeneratingFor(userId, sendTo);
     const settings = await getSettings(userId);
-    if (!settings.enabled || !settings.autoRefine)
+    if (!settings.enabled) {
+      debug(userId, `GENERATION_ENDED ${id}: auto-refine skipped (settings.enabled=false)`);
       return;
-    if (!hasPermission("chat_mutation"))
+    }
+    if (!settings.autoRefine) {
+      debug(userId, `GENERATION_ENDED ${id}: auto-refine skipped (settings.autoRefine=false)`);
       return;
+    }
+    if (!hasPermission("chat_mutation")) {
+      debug(userId, `GENERATION_ENDED ${id}: auto-refine skipped (missing 'chat_mutation' permission)`);
+      return;
+    }
     const chatId = payload.chatId;
     const messageId = payload.messageId;
-    if (!chatId || !messageId)
+    if (!chatId || !messageId) {
+      debug(userId, `GENERATION_ENDED ${id}: auto-refine skipped (payload missing chatId=${!!chatId} messageId=${!!messageId})`);
       return;
+    }
     const send = (m) => sendTo(m, userId);
     const messages = await spindle.chat.getMessages(chatId);
     const msg = messages.find((m) => m.id === messageId);
-    if (msg?.role !== "assistant")
+    if (msg?.role !== "assistant") {
+      debug(userId, `GENERATION_ENDED ${id}: auto-refine skipped (target role=${msg?.role || "(not found)"})`);
       return;
-    debug(userId, `Auto-refine triggered for ${messageId} in chat ${chatId}`);
+    }
+    debug(userId, `Auto-refine triggered for ${messageId.slice(0, 8)} in chat ${chatId.slice(0, 8)}`);
     send({ type: "auto-refine-started", messageId });
     try {
       await refineSingle(chatId, messageId, userId, send);
@@ -6286,6 +6482,7 @@ function registerEvents(sendTo) {
       await sendRefinedStateFor(userId, send);
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
+      debug(userId, `Auto-refine: refineSingle threw for ${messageId.slice(0, 8)}: ${error}`);
       spindle.log.warn(`Auto-refine failed: ${error}`);
       send({ type: "auto-refine-complete", messageId, success: false });
     }
@@ -6313,138 +6510,164 @@ function registerEvents(sendTo) {
 }
 
 // src/backend/handlers/refine.ts
-function requirePermission(p, ctx, messageId) {
-  if (hasPermission(p))
+var REFINE_PERMS = ["chat_mutation", "chats", "generation"];
+var UNDO_PERMS = ["chat_mutation", "chats"];
+var VIEW_PERMS = ["chats"];
+function beginUserAction(ctx) {
+  emitHostVersionWarning(ctx.userId, ctx.send);
+  return ctx;
+}
+function requirePermissions(required, ctx, messageId) {
+  const missing = getMissingPermissions(required);
+  if (missing.length === 0)
     return true;
-  const err = `Missing '${p}' permission. Grant it in extension settings.`;
-  spindle.log.warn(err);
+  const err = describeMissingPermissions(missing);
+  debug(ctx.userId, `requirePermissions: denied missing=[${missing.join(",")}] required=[${required.join(",")}] messageId=${messageId?.slice(0, 8) || "(none)"}`);
+  spindle.log.warn(`[Hone] permission check failed, missing: ${missing.join(", ")}`);
   ctx.send({ type: "refine-error", messageId: messageId || "", error: err });
   return false;
 }
 var refineHandlers = {
   async refine(msg, ctx) {
-    if (!requirePermission("chat_mutation", ctx, msg.messageId))
+    ctx = beginUserAction(ctx);
+    if (!requirePermissions(REFINE_PERMS, ctx, msg.messageId))
       return;
     debug(ctx.userId, `Refining message ${msg.messageId} in chat ${msg.chatId}`);
     await refineSingle(msg.chatId, msg.messageId, ctx.userId, ctx.send);
     await sendRefinedStateFor(ctx.userId, ctx.send);
   },
   async undo(msg, ctx) {
-    if (!requirePermission("chat_mutation", ctx, msg.messageId))
+    ctx = beginUserAction(ctx);
+    if (!requirePermissions(UNDO_PERMS, ctx, msg.messageId))
       return;
     debug(ctx.userId, `Undoing refinement for ${msg.messageId} in chat ${msg.chatId}`);
     await undoRefine(msg.chatId, msg.messageId, ctx.userId, ctx.send);
     await sendRefinedStateFor(ctx.userId, ctx.send);
   },
   async "bulk-refine"(msg, ctx) {
-    if (!requirePermission("chat_mutation", ctx))
+    ctx = beginUserAction(ctx);
+    if (!requirePermissions(REFINE_PERMS, ctx))
       return;
     debug(ctx.userId, `Bulk refining ${msg.messageIds.length} messages in chat ${msg.chatId}`);
     await refineBulk(msg.chatId, msg.messageIds, ctx.userId, ctx.send);
   },
   async enhance(msg, ctx) {
-    if (!requirePermission("chat_mutation", ctx))
+    ctx = beginUserAction(ctx);
+    const required = msg.mode === "post" ? REFINE_PERMS : ["chats", "generation"];
+    if (!requirePermissions(required, ctx))
       return;
     debug(ctx.userId, `Enhancing user message in chat ${msg.chatId} (mode: ${msg.mode})`);
     await enhanceUserMessage(msg.text, msg.chatId, ctx.userId, msg.mode, msg.requestId, ctx.send);
   },
   async "refine-last"(_msg, ctx) {
-    if (!requirePermission("chat_mutation", ctx))
-      return;
-    if (!requirePermission("chats", ctx))
+    ctx = beginUserAction(ctx);
+    if (!requirePermissions(REFINE_PERMS, ctx))
       return;
     try {
       const chatId = await getActiveChatIdFor(ctx.userId);
       if (!chatId) {
+        debug(ctx.userId, `refine-last: no active chat`);
         ctx.send({ type: "refine-error", messageId: "", error: "No active chat" });
         return;
       }
       const messages = await spindle.chat.getMessages(chatId);
       const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
       if (!lastAssistant) {
+        debug(ctx.userId, `refine-last: chat ${chatId.slice(0, 8)} has ${messages.length} message(s) but no assistant role`);
         ctx.send({ type: "refine-error", messageId: "", error: "No assistant message found in chat" });
         return;
       }
-      debug(ctx.userId, `Refine-last: refining ${lastAssistant.id} in chat ${chatId}`);
+      debug(ctx.userId, `refine-last: refining ${lastAssistant.id.slice(0, 8)} swipe=${lastAssistant.swipe_id} in chat ${chatId.slice(0, 8)}`);
       await refineSingle(chatId, lastAssistant.id, ctx.userId, ctx.send);
       await sendRefinedStateFor(ctx.userId, ctx.send);
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
+      debug(ctx.userId, `refine-last: threw: ${error}`);
       ctx.send({ type: "refine-error", messageId: "", error });
     }
   },
   async "undo-last"(_msg, ctx) {
-    if (!requirePermission("chat_mutation", ctx))
-      return;
-    if (!requirePermission("chats", ctx))
+    ctx = beginUserAction(ctx);
+    if (!requirePermissions(UNDO_PERMS, ctx))
       return;
     try {
       const chatId = await getActiveChatIdFor(ctx.userId);
       if (!chatId) {
+        debug(ctx.userId, `undo-last: no active chat`);
         ctx.send({ type: "refine-error", messageId: "", error: "No active chat" });
         return;
       }
       const messages = await spindle.chat.getMessages(chatId);
       const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
       if (!lastAssistant) {
+        debug(ctx.userId, `undo-last: chat ${chatId.slice(0, 8)} has no assistant message`);
         ctx.send({ type: "refine-error", messageId: "", error: "No assistant message in chat" });
         return;
       }
       const entry = await getUndo(ctx.userId, chatId, lastAssistant.id, lastAssistant.swipe_id);
       if (!entry) {
+        debug(ctx.userId, `undo-last: no undo entry for ${lastAssistant.id.slice(0, 8)} swipe=${lastAssistant.swipe_id}`);
         ctx.send({ type: "refine-error", messageId: "", error: "No undo available for the current swipe" });
         return;
       }
-      debug(ctx.userId, `Undo-last: undoing ${lastAssistant.id} swipe ${lastAssistant.swipe_id}`);
+      debug(ctx.userId, `undo-last: undoing ${lastAssistant.id.slice(0, 8)} swipe=${lastAssistant.swipe_id} strategy="${entry.strategy}"`);
       await undoRefine(chatId, lastAssistant.id, ctx.userId, ctx.send);
       await sendRefinedStateFor(ctx.userId, ctx.send);
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
+      debug(ctx.userId, `undo-last: threw: ${error}`);
       ctx.send({ type: "refine-error", messageId: "", error });
     }
   },
   async "refine-all"(_msg, ctx) {
-    if (!requirePermission("chat_mutation", ctx))
-      return;
-    if (!requirePermission("chats", ctx))
+    ctx = beginUserAction(ctx);
+    if (!requirePermissions(REFINE_PERMS, ctx))
       return;
     try {
       const chatId = await getActiveChatIdFor(ctx.userId);
       if (!chatId) {
+        debug(ctx.userId, `refine-all: no active chat`);
         ctx.send({ type: "refine-error", messageId: "", error: "No active chat" });
         return;
       }
       const messages = await spindle.chat.getMessages(chatId);
       const assistantIds = messages.filter((m) => m.role === "assistant").map((m) => m.id);
       if (assistantIds.length === 0) {
+        debug(ctx.userId, `refine-all: chat ${chatId.slice(0, 8)} has ${messages.length} message(s) but no assistants`);
         ctx.send({ type: "refine-error", messageId: "", error: "No assistant messages in chat" });
         return;
       }
-      debug(ctx.userId, `Refine-all: refining ${assistantIds.length} assistant messages in chat ${chatId}`);
+      debug(ctx.userId, `refine-all: refining ${assistantIds.length} assistant message(s) in chat ${chatId.slice(0, 8)}`);
       await refineBulk(chatId, assistantIds, ctx.userId, ctx.send);
       await sendRefinedStateFor(ctx.userId, ctx.send);
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
+      debug(ctx.userId, `refine-all: threw: ${error}`);
       ctx.send({ type: "refine-error", messageId: "", error });
     }
   },
   async "use-stage-version"(msg, ctx) {
-    if (!requirePermission("chat_mutation", ctx))
+    ctx = beginUserAction(ctx);
+    if (!requirePermissions(UNDO_PERMS, ctx, msg.messageId))
       return;
+    debug(ctx.userId, `ipc use-stage-version: chat=${msg.chatId.slice(0, 8)} msg=${msg.messageId.slice(0, 8)} stageIndex=${msg.stageIndex} stageKind=${msg.stageKind}`);
     await enqueueChatOperation(`${ctx.userId}:${msg.chatId}`, async () => {
       try {
         const currentMsg = (await spindle.chat.getMessages(msg.chatId)).find((m) => m.id === msg.messageId);
         if (!currentMsg) {
+          debug(ctx.userId, `use-stage-version: message ${msg.messageId.slice(0, 8)} not found in chat`);
           ctx.send({ type: "refine-error", messageId: msg.messageId, error: "Message not found" });
           return;
         }
         const swipeId = currentMsg.swipe_id;
         const existingEntry = await getUndo(ctx.userId, msg.chatId, msg.messageId, swipeId);
         if (!existingEntry) {
+          debug(ctx.userId, `use-stage-version: no undo entry for ${msg.messageId.slice(0, 8)} swipe=${swipeId}`);
           ctx.send({ type: "refine-error", messageId: msg.messageId, error: "No active refinement on this swipe" });
           return;
         }
         if (!existingEntry.stages || existingEntry.stages.length === 0) {
+          debug(ctx.userId, `use-stage-version: undo entry for ${msg.messageId.slice(0, 8)} swipe=${swipeId} has no stages (single-strategy refinement)`);
           ctx.send({
             type: "refine-error",
             messageId: msg.messageId,
@@ -6454,6 +6677,7 @@ var refineHandlers = {
         }
         const stage = existingEntry.stages.find((s) => s.index === msg.stageIndex && s.kind === msg.stageKind);
         if (!stage) {
+          debug(ctx.userId, `use-stage-version: stage ${msg.stageKind}[${msg.stageIndex}] not in entry (available: ${existingEntry.stages.map((s) => `${s.kind}[${s.index}]`).join(",")})`);
           ctx.send({
             type: "refine-error",
             messageId: msg.messageId,
@@ -6461,6 +6685,7 @@ var refineHandlers = {
           });
           return;
         }
+        debug(ctx.userId, `use-stage-version: applying stage "${stage.name}" (${stage.kind}[${stage.index}]) textLen=${stage.text.length}`);
         const updatedEntry = {
           ...existingEntry,
           refinedContent: stage.text,
@@ -6490,6 +6715,7 @@ var refineHandlers = {
         await sendRefinedStateFor(ctx.userId, ctx.send);
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
+        debug(ctx.userId, `use-stage-version: threw: ${error}`);
         ctx.send({ type: "refine-error", messageId: msg.messageId, error });
       }
     });
@@ -6519,19 +6745,23 @@ var refineHandlers = {
     debug(ctx.userId, `cancel-active chat=${chatId.slice(0, 8)}: cancelled ${n} op(s)`);
   },
   async "view-diff"(msg, ctx) {
-    if (!requirePermission("chats", ctx, msg.messageId))
+    if (!requirePermissions(VIEW_PERMS, ctx, msg.messageId))
       return;
+    debug(ctx.userId, `ipc view-diff: chat=${msg.chatId.slice(0, 8)} msg=${msg.messageId.slice(0, 8)}`);
     try {
       const messages = await spindle.chat.getMessages(msg.chatId);
       const targetMsg = messages.find((m) => m.id === msg.messageId);
       if (!targetMsg) {
+        debug(ctx.userId, `view-diff: message ${msg.messageId.slice(0, 8)} not found`);
         ctx.send({ type: "refine-error", messageId: msg.messageId, error: "Message not found" });
         return;
       }
       const entry = await getUndo(ctx.userId, msg.chatId, msg.messageId, targetMsg.swipe_id);
       if (entry) {
+        debug(ctx.userId, `view-diff: hit ${msg.messageId.slice(0, 8)} swipe=${targetMsg.swipe_id} origLen=${entry.originalContent.length} refLen=${entry.refinedContent.length}`);
         ctx.send({ type: "diff", original: entry.originalContent, refined: entry.refinedContent });
       } else {
+        debug(ctx.userId, `view-diff: no undo entry for ${msg.messageId.slice(0, 8)} swipe=${targetMsg.swipe_id}`);
         ctx.send({ type: "refine-error", messageId: msg.messageId, error: "No diff data found for this swipe" });
       }
     } catch (err) {
@@ -6546,6 +6776,10 @@ var refineHandlers = {
 async function pushPresets(userId, send) {
   const presets = await listPresets(userId);
   const settings = await getSettings(userId);
+  const outputCount = presets.filter((p) => p.slot === "output").length;
+  const inputCount = presets.filter((p) => p.slot === "input").length;
+  const builtInCount = presets.filter((p) => p.builtIn).length;
+  debug(userId, `pushPresets: ${presets.length} total (${outputCount} output, ${inputCount} input, ${builtInCount} built-in), activeOutput="${settings.currentPresetId}" activeInput="${settings.currentInputPresetId}"`);
   send({
     type: "presets",
     presets,
@@ -6569,12 +6803,16 @@ var presetHandlers = {
     ctx.send({ type: "preset", preset });
   },
   async "save-preset"(msg, ctx) {
-    debug(ctx.userId, `ipc save-preset: id="${msg.preset.id}" name="${msg.preset.name}"`);
+    const p = msg.preset;
+    const stageCount = p.strategy === "pipeline" ? p.pipeline?.stages.length ?? 0 : (p.parallel?.proposals.reduce((n, pr) => n + pr.stages.length, 0) ?? 0) + (p.parallel?.aggregator.stages.length ?? 0);
+    debug(ctx.userId, `ipc save-preset: id="${p.id}" name="${p.name}" slot=${p.slot} strategy=${p.strategy} prompts=${p.prompts.length} head=${p.headCollection.length} stages=${stageCount} shield=${p.shieldLiteralBlocks}`);
     try {
       await savePreset(ctx.userId, msg.preset);
+      debug(ctx.userId, `ipc save-preset: persisted id="${p.id}"`);
       await pushPresets(ctx.userId, ctx.send);
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
+      debug(ctx.userId, `ipc save-preset: FAILED for id="${p.id}": ${error}`);
       spindle.log.warn(`[Hone] save-preset failed: ${error}`);
       ctx.send({ type: "preset-import-result", success: false, error });
     }
@@ -6583,8 +6821,10 @@ var presetHandlers = {
     debug(ctx.userId, `ipc delete-preset: id="${msg.id}"`);
     try {
       await deletePreset(ctx.userId, msg.id);
+      debug(ctx.userId, `ipc delete-preset: deleted id="${msg.id}"`);
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
+      debug(ctx.userId, `ipc delete-preset: FAILED for id="${msg.id}": ${error}`);
       spindle.log.warn(`[Hone] delete-preset failed: ${error}`);
       ctx.send({ type: "refine-error", messageId: "", error: `Failed to delete preset: ${error}` });
       await pushPresets(ctx.userId, ctx.send);
@@ -6596,20 +6836,24 @@ var presetHandlers = {
       fallbacks.currentPresetId = DEFAULT_ACTIVE_PRESET_ID;
     if (settings.currentInputPresetId === msg.id)
       fallbacks.currentInputPresetId = DEFAULT_INPUT_ACTIVE_PRESET_ID;
-    if (Object.keys(fallbacks).length > 0)
+    if (Object.keys(fallbacks).length > 0) {
+      debug(ctx.userId, `ipc delete-preset: patching active selections after delete -> ${JSON.stringify(fallbacks)}`);
       await updateSettings(ctx.userId, fallbacks);
+    }
     await pushPresets(ctx.userId, ctx.send);
   },
   async "duplicate-preset"(msg, ctx) {
     debug(ctx.userId, `ipc duplicate-preset: source="${msg.id}" slot=${msg.slot}`);
     try {
       const copy = await duplicatePreset(ctx.userId, msg.id);
+      debug(ctx.userId, `ipc duplicate-preset: created copy id="${copy.id}" name="${copy.name}" from "${msg.id}", activating in slot=${msg.slot}`);
       const settingsKey = msg.slot === "input" ? "currentInputPresetId" : "currentPresetId";
       await updateSettings(ctx.userId, { [settingsKey]: copy.id });
       await pushPresets(ctx.userId, ctx.send);
       ctx.send({ type: "preset", preset: copy });
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
+      debug(ctx.userId, `ipc duplicate-preset: FAILED for id="${msg.id}": ${error}`);
       spindle.log.warn(`[Hone] duplicate-preset failed: ${error}`);
       ctx.send({ type: "preset-import-result", success: false, error });
     }
@@ -6618,9 +6862,11 @@ var presetHandlers = {
     debug(ctx.userId, `ipc set-active-preset: id="${msg.id}" slot=${msg.slot}`);
     const preset = await getPreset(ctx.userId, msg.id);
     if (!preset) {
+      debug(ctx.userId, `ipc set-active-preset: preset "${msg.id}" not found, ignoring`);
       spindle.log.warn(`[Hone] set-active-preset: preset "${msg.id}" not found`);
       return;
     }
+    debug(ctx.userId, `ipc set-active-preset: activated id="${preset.id}" name="${preset.name}" strategy=${preset.strategy}`);
     const settingsKey = msg.slot === "input" ? "currentInputPresetId" : "currentPresetId";
     await updateSettings(ctx.userId, { [settingsKey]: msg.id });
     await pushPresets(ctx.userId, ctx.send);
@@ -6630,6 +6876,7 @@ var presetHandlers = {
     debug(ctx.userId, `ipc export-preset: id="${msg.id}"`);
     try {
       const exported = await exportPreset(ctx.userId, msg.id);
+      debug(ctx.userId, `ipc export-preset: exported id="${exported.id}" name="${exported.name}" size=${exported.json.length} bytes`);
       ctx.send({
         type: "preset-exported",
         id: exported.id,
@@ -6638,14 +6885,16 @@ var presetHandlers = {
       });
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
+      debug(ctx.userId, `ipc export-preset: FAILED for id="${msg.id}": ${error}`);
       spindle.log.warn(`[Hone] export-preset failed: ${error}`);
       ctx.send({ type: "preset-import-result", success: false, error });
     }
   },
   async "import-preset"(msg, ctx) {
-    debug(ctx.userId, `ipc import-preset: ${msg.json.length} chars slot=${msg.slot}`);
+    debug(ctx.userId, `ipc import-preset: ${msg.json.length} bytes slot=${msg.slot}`);
     try {
       const imported = await importPreset(ctx.userId, msg.json, msg.slot);
+      debug(ctx.userId, `ipc import-preset: imported id="${imported.id}" name="${imported.name}" strategy=${imported.strategy}, activating`);
       const settingsKey = msg.slot === "input" ? "currentInputPresetId" : "currentPresetId";
       await updateSettings(ctx.userId, { [settingsKey]: imported.id });
       await pushPresets(ctx.userId, ctx.send);
@@ -6653,6 +6902,7 @@ var presetHandlers = {
       ctx.send({ type: "preset-import-result", success: true, id: imported.id });
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
+      debug(ctx.userId, `ipc import-preset: FAILED: ${error}`);
       spindle.log.warn(`[Hone] import-preset failed: ${error}`);
       ctx.send({ type: "preset-import-result", success: false, error });
     }
@@ -6665,16 +6915,19 @@ var presetHandlers = {
       const presetId = msg.slot === "input" ? settings.currentInputPresetId : settings.currentPresetId;
       const preset = await getPreset(ctx.userId, presetId);
       if (!preset) {
+        debug(ctx.userId, `ipc preview-stage: no active ${msg.slot} preset (id="${presetId}")`);
         spindle.log.warn(`[Hone] preview-stage: no active ${msg.slot} preset`);
         return;
       }
       const pipeline = msg.path.kind === "pipeline" ? preset.pipeline : msg.path.kind === "proposal" ? preset.parallel?.proposals[msg.path.proposalIndex] : preset.parallel?.aggregator;
       if (!pipeline) {
+        debug(ctx.userId, `ipc preview-stage: pipeline not found for path=${JSON.stringify(msg.path)} (preset.strategy=${preset.strategy})`);
         spindle.log.warn(`[Hone] preview-stage: pipeline not found for path ${JSON.stringify(msg.path)}`);
         return;
       }
       const stage = pipeline.stages[msg.stageIndex];
       if (!stage) {
+        debug(ctx.userId, `ipc preview-stage: stage ${msg.stageIndex} out of bounds (pipeline has ${pipeline.stages.length} stages)`);
         spindle.log.warn(`[Hone] preview-stage: stage ${msg.stageIndex} not found`);
         return;
       }
@@ -6698,18 +6951,21 @@ var presetHandlers = {
 // src/backend/handlers/profiles.ts
 var profileHandlers = {
   async "list-model-profiles"(_msg, ctx) {
-    debug(ctx.userId, `ipc in: list-model-profiles`);
+    debug(ctx.userId, `ipc list-model-profiles: fetching`);
     const profiles = await listModelProfiles(ctx.userId);
+    debug(ctx.userId, `ipc list-model-profiles: returning ${profiles.length} profile(s) ids=[${profiles.map((p) => p.id).join(",")}]`);
     ctx.send({ type: "model-profiles", profiles });
   },
   async "get-model-profile"(msg, ctx) {
-    debug(ctx.userId, `ipc in: get-model-profile`);
+    debug(ctx.userId, `ipc get-model-profile: id="${msg.id}"`);
     if (msg.id === DEFAULT_PROFILE_ID) {
+      debug(ctx.userId, `ipc get-model-profile: returning virtual default profile`);
       ctx.send({ type: "model-profile", profile: getDefaultProfile() });
       return;
     }
     const profile = await getModelProfile(ctx.userId, msg.id);
     if (profile) {
+      debug(ctx.userId, `ipc get-model-profile: hit id="${msg.id}" name="${profile.name}" connection="${profile.connectionProfileId || "(default)"}"`);
       ctx.send({ type: "model-profile", profile });
       return;
     }
@@ -6717,13 +6973,15 @@ var profileHandlers = {
     ctx.send({ type: "model-profile", profile: getDefaultProfile() });
     const settings = await getSettings(ctx.userId);
     if (settings.activeModelProfileId === msg.id) {
+      debug(ctx.userId, `ipc get-model-profile: active profile was the missing id, clearing activeModelProfileId`);
       await updateSettings(ctx.userId, { activeModelProfileId: "" });
       ctx.send({ type: "settings", settings: { ...settings, activeModelProfileId: "" } });
     }
   },
   async "create-model-profile"(msg, ctx) {
-    debug(ctx.userId, `ipc in: create-model-profile`);
+    debug(ctx.userId, `ipc create-model-profile: connectionProfileId="${msg.connectionProfileId || "(default)"}" name="${msg.name}"`);
     const profile = await createModelProfile(ctx.userId, msg.connectionProfileId, msg.name);
+    debug(ctx.userId, `ipc create-model-profile: created id="${profile.id}" activating`);
     ctx.send({ type: "model-profile", profile });
     await updateSettings(ctx.userId, { activeModelProfileId: profile.id });
     const updatedSettings = await getSettings(ctx.userId);
@@ -6731,16 +6989,33 @@ var profileHandlers = {
     ctx.send({ type: "model-profiles", profiles: await listModelProfiles(ctx.userId) });
   },
   async "save-model-profile"(msg, ctx) {
-    debug(ctx.userId, `ipc in: save-model-profile`);
-    await saveModelProfile(ctx.userId, msg.profile);
+    debug(ctx.userId, `ipc save-model-profile: id="${msg.profile.id}" name="${msg.profile.name}" connection="${msg.profile.connectionProfileId || "(default)"}" reasoning=${JSON.stringify(msg.profile.reasoning)}`);
+    try {
+      await saveModelProfile(ctx.userId, msg.profile);
+      debug(ctx.userId, `ipc save-model-profile: persisted id="${msg.profile.id}"`);
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      debug(ctx.userId, `ipc save-model-profile: FAILED for id="${msg.profile.id}": ${error}`);
+      spindle.log.warn(`[Hone] save-model-profile failed: ${error}`);
+      throw err;
+    }
     ctx.send({ type: "model-profile", profile: msg.profile });
     ctx.send({ type: "model-profiles", profiles: await listModelProfiles(ctx.userId) });
   },
   async "delete-model-profile"(msg, ctx) {
-    debug(ctx.userId, `ipc in: delete-model-profile`);
-    await deleteModelProfile(ctx.userId, msg.id);
+    debug(ctx.userId, `ipc delete-model-profile: id="${msg.id}"`);
+    try {
+      await deleteModelProfile(ctx.userId, msg.id);
+      debug(ctx.userId, `ipc delete-model-profile: deleted id="${msg.id}"`);
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      debug(ctx.userId, `ipc delete-model-profile: FAILED for id="${msg.id}": ${error}`);
+      spindle.log.warn(`[Hone] delete-model-profile failed: ${error}`);
+      throw err;
+    }
     const settings = await getSettings(ctx.userId);
     if (settings.activeModelProfileId === msg.id) {
+      debug(ctx.userId, `ipc delete-model-profile: cleared activeModelProfileId (pointed at deleted id)`);
       await updateSettings(ctx.userId, { activeModelProfileId: "" });
       const updatedSettings = await getSettings(ctx.userId);
       ctx.send({ type: "settings", settings: updatedSettings });
@@ -6748,12 +7023,13 @@ var profileHandlers = {
     ctx.send({ type: "model-profiles", profiles: await listModelProfiles(ctx.userId) });
   },
   async "duplicate-model-profile"(msg, ctx) {
-    debug(ctx.userId, `ipc in: duplicate-model-profile`);
+    debug(ctx.userId, `ipc duplicate-model-profile: id="${msg.id}"`);
     const dup = msg.id === DEFAULT_PROFILE_ID ? await createModelProfile(ctx.userId, "", "New Profile") : await duplicateModelProfile(ctx.userId, msg.id);
     if (!dup) {
       debug(ctx.userId, `ipc duplicate-model-profile: source "${msg.id}" not found`);
       return;
     }
+    debug(ctx.userId, `ipc duplicate-model-profile: created copy id="${dup.id}" name="${dup.name}" (from "${msg.id}")`);
     await updateSettings(ctx.userId, { activeModelProfileId: dup.id });
     const updatedSettings = await getSettings(ctx.userId);
     ctx.send({ type: "settings", settings: updatedSettings });
@@ -6765,26 +7041,31 @@ var profileHandlers = {
 // src/backend/handlers/pov.ts
 var povHandlers = {
   async "list-pov-presets"(_msg, ctx) {
-    debug(ctx.userId, `ipc in: list-pov-presets`);
-    ctx.send({ type: "pov-presets", presets: await listPovPresets(ctx.userId) });
+    debug(ctx.userId, `ipc list-pov-presets: fetching`);
+    const presets = await listPovPresets(ctx.userId);
+    const builtInCount = presets.filter((p) => p.builtIn).length;
+    debug(ctx.userId, `ipc list-pov-presets: returning ${presets.length} preset(s) (${builtInCount} built-in, ${presets.length - builtInCount} custom)`);
+    ctx.send({ type: "pov-presets", presets });
   },
   async "save-pov-preset"(msg, ctx) {
-    debug(ctx.userId, `ipc in: save-pov-preset id="${msg.preset.id}"`);
+    debug(ctx.userId, `ipc save-pov-preset: id="${msg.preset.id}" name="${msg.preset.name}" contentLen=${msg.preset.content.length}`);
     try {
       if (isBuiltInPovPresetId(msg.preset.id)) {
         throw new Error(`Cannot save over built-in POV preset "${msg.preset.id}"; duplicate it first.`);
       }
       await savePovPreset(ctx.userId, msg.preset);
+      debug(ctx.userId, `ipc save-pov-preset: persisted id="${msg.preset.id}"`);
       ctx.send({ type: "pov-presets", presets: await listPovPresets(ctx.userId) });
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
+      debug(ctx.userId, `ipc save-pov-preset: FAILED for id="${msg.preset.id}": ${error}`);
       spindle.log.warn(`[Hone] save-pov-preset failed: ${error}`);
       ctx.send({ type: "pov-presets", presets: await listPovPresets(ctx.userId) });
       ctx.send({ type: "pov-preset-error", error: `Failed to save POV preset: ${error}` });
     }
   },
   async "delete-pov-preset"(msg, ctx) {
-    debug(ctx.userId, `ipc in: delete-pov-preset id="${msg.id}"`);
+    debug(ctx.userId, `ipc delete-pov-preset: id="${msg.id}"`);
     try {
       if (isBuiltInPovPresetId(msg.id)) {
         throw new Error(`Cannot delete built-in POV preset "${msg.id}".`);
@@ -6797,27 +7078,33 @@ var povHandlers = {
       if (settings.userPov === msg.id)
         patch.userPov = DEFAULT_USER_POV_PRESET_ID;
       if (Object.keys(patch).length > 0) {
+        debug(ctx.userId, `ipc delete-pov-preset: patching active selection(s) -> ${JSON.stringify(patch)}`);
         const updated = await updateSettings(ctx.userId, patch);
         ctx.send({ type: "settings", settings: updated });
+      } else {
+        debug(ctx.userId, `ipc delete-pov-preset: no active selection pointed at id="${msg.id}"`);
       }
       ctx.send({ type: "pov-presets", presets: await listPovPresets(ctx.userId) });
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
+      debug(ctx.userId, `ipc delete-pov-preset: FAILED for id="${msg.id}": ${error}`);
       spindle.log.warn(`[Hone] delete-pov-preset failed: ${error}`);
       ctx.send({ type: "pov-presets", presets: await listPovPresets(ctx.userId) });
       ctx.send({ type: "pov-preset-error", error: `Failed to delete POV preset: ${error}` });
     }
   },
   async "duplicate-pov-preset"(msg, ctx) {
-    debug(ctx.userId, `ipc in: duplicate-pov-preset id="${msg.id}" slot=${msg.slot}`);
+    debug(ctx.userId, `ipc duplicate-pov-preset: id="${msg.id}" slot=${msg.slot}`);
     try {
       const copy = await duplicatePovPreset(ctx.userId, msg.id);
+      debug(ctx.userId, `ipc duplicate-pov-preset: created copy id="${copy.id}" name="${copy.name}" (from "${msg.id}")`);
       const settingsKey = msg.slot === "input" ? "userPov" : "pov";
       const updated = await updateSettings(ctx.userId, { [settingsKey]: copy.id });
       ctx.send({ type: "settings", settings: updated });
       ctx.send({ type: "pov-presets", presets: await listPovPresets(ctx.userId) });
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
+      debug(ctx.userId, `ipc duplicate-pov-preset: FAILED for id="${msg.id}": ${error}`);
       spindle.log.warn(`[Hone] duplicate-pov-preset failed: ${error}`);
       ctx.send({ type: "pov-presets", presets: await listPovPresets(ctx.userId) });
       ctx.send({ type: "pov-preset-error", error: `Failed to duplicate POV preset: ${error}` });
@@ -6828,14 +7115,19 @@ var povHandlers = {
 // src/backend/handlers/settings.ts
 var settingsHandlers = {
   async "get-settings"(_msg, ctx) {
+    debug(ctx.userId, `ipc get-settings: loading`);
     const settings = await getSettings(ctx.userId);
+    debug(ctx.userId, `ipc get-settings: returning activeModelProfileId="${settings.activeModelProfileId}" currentPresetId="${settings.currentPresetId}" currentInputPresetId="${settings.currentInputPresetId}" enabled=${settings.enabled} autoRefine=${settings.autoRefine} debugLogging=${settings.debugLogging}`);
     ctx.send({ type: "settings", settings });
   },
   async "update-settings"(msg, ctx) {
+    const keys = Object.keys(msg.settings);
+    debug(ctx.userId, `ipc update-settings: keys=[${keys.join(",")}] values=${JSON.stringify(msg.settings)}`);
     const updated = await updateSettings(ctx.userId, msg.settings);
     ctx.send({ type: "settings", settings: updated });
     if ("debugLogging" in msg.settings || "debugLogMaxEntries" in msg.settings) {
       const stats = bufferStats(ctx.userId);
+      debug(ctx.userId, `ipc update-settings: debug buffer state enabled=${stats.enabled} count=${stats.count}/${stats.capacity}`);
       ctx.send({
         type: "debug-logs",
         formatted: formatLogs(ctx.userId),
@@ -6846,36 +7138,46 @@ var settingsHandlers = {
     }
   },
   async "get-stats"(msg, ctx) {
-    if (!hasPermission("chats"))
+    debug(ctx.userId, `ipc get-stats: chatId=${msg.chatId.slice(0, 8)}`);
+    if (!hasPermission("chats")) {
+      debug(ctx.userId, `ipc get-stats: 'chats' permission missing, dropping`);
       return;
+    }
     const stats = await getStats(ctx.userId, msg.chatId);
+    debug(ctx.userId, `ipc get-stats: returning messagesRefined=${stats.messagesRefined} totalRefinements=${stats.totalRefinements} strategies=[${Object.keys(stats.byStrategy).join(",")}]`);
     ctx.send({ type: "stats", stats });
   },
   async "get-connections"(_msg, ctx) {
-    if (!hasPermission("generation"))
+    debug(ctx.userId, `ipc get-connections: fetching`);
+    if (!hasPermission("generation")) {
+      debug(ctx.userId, `ipc get-connections: 'generation' permission missing, dropping (frontend select will show 'No connections available')`);
       return;
+    }
     try {
       const conns = await spindle.connections.list(ctx.userId);
-      ctx.send({
-        type: "connections",
-        connections: (conns ?? []).map((c) => ({
-          id: c.id,
-          name: c.name,
-          provider: c.provider || "",
-          model: c.model || "",
-          is_default: !!c.is_default,
-          has_api_key: !!c.has_api_key
-        }))
-      });
+      const mapped = (conns ?? []).map((c) => ({
+        id: c.id,
+        name: c.name,
+        provider: c.provider || "",
+        model: c.model || "",
+        is_default: !!c.is_default,
+        has_api_key: !!c.has_api_key
+      }));
+      const defaultCount = mapped.filter((c) => c.is_default).length;
+      const missingKeyCount = mapped.filter((c) => !c.has_api_key).length;
+      debug(ctx.userId, `ipc get-connections: returning ${mapped.length} connection(s), ${defaultCount} marked is_default, ${missingKeyCount} missing api_key`);
+      ctx.send({ type: "connections", connections: mapped });
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
+      debug(ctx.userId, `ipc get-connections: spindle.connections.list threw: ${error}`);
       spindle.log.warn(`get-connections failed: ${error}`);
       ctx.send({ type: "connections", connections: [], error });
     }
   },
   async "get-active-chat"(_msg, ctx) {
+    debug(ctx.userId, `ipc get-active-chat: fetching`);
     const chatId = await getActiveChatIdFor(ctx.userId);
-    debug(ctx.userId, `Active chat: ${chatId || "none"}`);
+    debug(ctx.userId, `ipc get-active-chat: active chat = ${chatId || "none"}`);
     if (!chatId) {
       ctx.send({
         type: "active-chat",
@@ -6901,8 +7203,9 @@ var settingsHandlers = {
 // src/backend/handlers/debug.ts
 var debugHandlers = {
   async "get-debug-logs"(_msg, ctx) {
-    const formatted = formatLogs(ctx.userId);
     const stats = bufferStats(ctx.userId);
+    debug(ctx.userId, `ipc get-debug-logs: formatting ${stats.count}/${stats.capacity} entries (enabled=${stats.enabled})`);
+    const formatted = formatLogs(ctx.userId);
     ctx.send({
       type: "debug-logs",
       formatted,
@@ -6912,7 +7215,9 @@ var debugHandlers = {
     });
   },
   async "clear-debug-logs"(_msg, ctx) {
+    const before = bufferStats(ctx.userId);
     clearLogs(ctx.userId);
+    debug(ctx.userId, `ipc clear-debug-logs: cleared ${before.count}/${before.capacity} entries`);
     const stats = bufferStats(ctx.userId);
     ctx.send({
       type: "debug-logs",
@@ -6929,6 +7234,54 @@ var debugHandlers = {
     debug(ctx.userId, `[frontend ${msg.level}] ${msg.msg}`);
   }
 };
+
+// src/backend/version-check.ts
+function compareVersions(a, b) {
+  const parse = (v) => {
+    const core = v.split(/[-+]/)[0];
+    return core.split(".").map((part) => {
+      const n = parseInt(part, 10);
+      return Number.isFinite(n) ? n : 0;
+    });
+  };
+  const pa = parse(a);
+  const pb = parse(b);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0;i < len; i++) {
+    const ai = pa[i] ?? 0;
+    const bi = pb[i] ?? 0;
+    if (ai > bi)
+      return 1;
+    if (ai < bi)
+      return -1;
+  }
+  return 0;
+}
+function checkHostVersion(hostVersion, minimum) {
+  if (!hostVersion) {
+    return {
+      needsUpdate: false,
+      hostVersion: null,
+      minimum,
+      message: `Lumiverse version could not be determined, skipping minimum-version check (required minimum ${minimum})`
+    };
+  }
+  const cmp = compareVersions(hostVersion, minimum);
+  if (cmp >= 0) {
+    return {
+      needsUpdate: false,
+      hostVersion,
+      minimum,
+      message: `Lumiverse ${hostVersion} satisfies Hone's minimum of ${minimum}`
+    };
+  }
+  return {
+    needsUpdate: true,
+    hostVersion,
+    minimum,
+    message: `Hone requires Lumiverse ${minimum} or newer, but this host is running ${hostVersion}. Some features may fail or behave unexpectedly. Update Lumiverse for the intended experience.`
+  };
+}
 
 // src/backend/index.ts
 function sendTo(msg, userId) {
@@ -6950,19 +7303,89 @@ spindle.onFrontendMessage(async (raw, userId) => {
     return;
   }
   debug(userId, `ipc in: ${msg.type}${"chatId" in msg && typeof msg.chatId === "string" ? ` chatId=${msg.chatId.slice(0, 8)}` : ""}${"messageId" in msg && typeof msg.messageId === "string" ? ` msgId=${msg.messageId.slice(0, 8)}` : ""}`);
+  const rawSend = (m) => sendTo(m, userId);
+  const send = wrapSendWithVersionWarning(rawSend);
   try {
     await dispatch(msg, {
       userId,
-      send: (m) => sendTo(m, userId)
+      send
     });
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
+    debug(userId, `ipc dispatch: handler for '${msg.type}' threw: ${error}`);
     spindle.log.warn(`IPC handler error (${msg.type}): ${error}`);
   }
 });
 registerEvents(sendTo);
+async function captureHostVersions() {
+  let backend = null;
+  let frontend = null;
+  try {
+    backend = await spindle.version.getBackend();
+  } catch (err) {
+    spindle.log.warn(`Hone: spindle.version.getBackend() failed: ${err instanceof Error ? err.message : err}`);
+  }
+  try {
+    frontend = await spindle.version.getFrontend();
+  } catch (err) {
+    spindle.log.warn(`Hone: spindle.version.getFrontend() failed: ${err instanceof Error ? err.message : err}`);
+  }
+  setHostVersions(backend, frontend);
+  return { backend, frontend };
+}
+var hostVersionCheck = null;
+function getHostVersionWarning() {
+  if (!hostVersionCheck || !hostVersionCheck.needsUpdate)
+    return null;
+  return hostVersionCheck;
+}
+function emitHostVersionWarning(userId, send) {
+  const warning = getHostVersionWarning();
+  if (!warning)
+    return;
+  debug(userId, `emitHostVersionWarning: nagging user (hostVersion=${warning.hostVersion ?? "unknown"} minimum=${warning.minimum})`);
+  send({
+    type: "host-version-warning",
+    hostVersion: warning.hostVersion,
+    minimum: warning.minimum,
+    message: warning.message
+  });
+}
+function wrapSendWithVersionWarning(send) {
+  const warning = getHostVersionWarning();
+  if (!warning)
+    return send;
+  return (m) => {
+    if (m.type === "refine-error" && m.error && m.error !== "ABORTED") {
+      send({ ...m, error: `${m.error}
+
+${warning.message}` });
+    } else if (m.type === "preset-import-result" && m.error) {
+      send({ ...m, error: `${m.error}
+
+${warning.message}` });
+    } else if (m.type === "pov-preset-error" && m.error) {
+      send({ ...m, error: `${m.error}
+
+${warning.message}` });
+    } else {
+      send(m);
+    }
+  };
+}
 async function init() {
   await initPermissions();
-  spindle.log.info("Hone extension loaded");
+  const { backend, frontend } = await captureHostVersions();
+  hostVersionCheck = checkHostVersion(backend, HONE_MINIMUM_LUMIVERSE_VERSION);
+  const tag = hostVersionCheck.needsUpdate ? "WARN" : "ok";
+  spindle.log.info(`Hone v${HONE_VERSION} extension loaded (Lumiverse backend=${backend ?? "unknown"} frontend=${frontend ?? "unknown"}, min=${HONE_MINIMUM_LUMIVERSE_VERSION} ${tag})`);
+  if (hostVersionCheck.needsUpdate) {
+    spindle.log.warn(`[Hone] ${hostVersionCheck.message}`);
+  }
 }
 init();
+export {
+  wrapSendWithVersionWarning,
+  getHostVersionWarning,
+  emitHostVersionWarning
+};

@@ -2544,8 +2544,31 @@ function createSettingsPage(_ctx, sendToBackend) {
   }
   return { root, update, handleBackendMessage, destroy };
 }
+// spindle.json
+var spindle_default = {
+  version: "0.2.1",
+  name: "Hone",
+  identifier: "hone",
+  author: "Mousepad",
+  github: "https://github.com/AMousePad/Hone",
+  homepage: "https://github.com/AMousePad/Hone",
+  description: "Refine AI responses and enhance user messages with configurable quality rules.",
+  permissions: [
+    "chat_mutation",
+    "chats",
+    "characters",
+    "world_books",
+    "generation",
+    "ui_panels"
+  ],
+  entry_backend: "dist/backend.js",
+  entry_frontend: "dist/frontend.js",
+  minimum_lumiverse_version: "0.9.2"
+};
 
 // src/constants.ts
+var HONE_VERSION = spindle_default.version;
+var HONE_MINIMUM_LUMIVERSE_VERSION = spindle_default.minimum_lumiverse_version;
 var DEFAULT_PROFILE_ID = "__default__";
 var HEAD_COLLECTION_ID = "__head__";
 
@@ -6548,6 +6571,15 @@ function setup(ctx) {
             variant: "danger"
           }).catch(() => {});
         }
+        break;
+      case "host-version-warning":
+        ctx.ui.showConfirm({
+          title: "Update Lumiverse",
+          message: msg.message,
+          confirmLabel: "OK",
+          cancelLabel: "Dismiss",
+          variant: "warning"
+        }).catch(() => {});
         break;
     }
   });

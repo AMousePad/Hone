@@ -7,9 +7,12 @@ import * as hlog from "../hlog";
 export async function getActiveChatIdFor(userId: string): Promise<string | null> {
   try {
     const active = await spindle.chats.getActive(userId);
-    return active?.id || null;
+    const id = active?.id || null;
+    hlog.debug(userId, `getActiveChatIdFor: spindle.chats.getActive -> ${id ? id.slice(0, 8) : "null"}`);
+    return id;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    hlog.debug(userId, `getActiveChatIdFor: spindle.chats.getActive threw: ${message}`);
     spindle.log.warn(`getActiveChatIdFor(${userId}) failed: ${message}`);
     return null;
   }
@@ -52,6 +55,7 @@ export async function snapshotLastAiState(
     return { messageId: lastAssistant.id, refined: true, stages, refinedMessageIds };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    hlog.debug(userId, `snapshotLastAiState(${chatId.slice(0, 8)}): threw: ${message}`);
     spindle.log.warn(`snapshotLastAiState(${userId}, ${chatId}) failed: ${message}`);
     return { messageId: null, refined: false, refinedMessageIds: [] };
   }

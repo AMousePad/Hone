@@ -1,6 +1,6 @@
 {
   "name": "hone-lumiverse",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "scripts": {
     "gen:assets": "bun scripts/gen-asset-modules.ts",
@@ -17,7 +17,7 @@
     "@playwright/test": "^1.47.0",
     "@types/node": "^22.5.0",
     "dotenv": "^16.4.5",
-    "lumiverse-spindle-types": "^0.4.24",
+    "lumiverse-spindle-types": "^0.4.27",
     "typescript": "^6.0.2",
     "vitest": "^3.0.0"
   }

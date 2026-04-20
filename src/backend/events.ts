@@ -99,20 +99,42 @@ export function registerEvents(sendTo: (m: BackendToFrontend, u: string) => void
         publishGeneratingFor(userId, sendTo);
 
         const settings = await getSettings(userId);
-        if (!settings.enabled || !settings.autoRefine) return;
-        if (!hasPermission("chat_mutation")) return;
+        if (!settings.enabled) {
+          hlog.debug(userId, `GENERATION_ENDED ${id}: auto-refine skipped (settings.enabled=false)`);
+          return;
+        }
+        if (!settings.autoRefine) {
+          hlog.debug(userId, `GENERATION_ENDED ${id}: auto-refine skipped (settings.autoRefine=false)`);
+          return;
+        }
+        if (!hasPermission("chat_mutation")) {
+          hlog.debug(userId, `GENERATION_ENDED ${id}: auto-refine skipped (missing 'chat_mutation' permission)`);
+          return;
+        }
 
         const chatId = payload.chatId;
         const messageId = payload.messageId;
-        if (!chatId || !messageId) return;
+        if (!chatId || !messageId) {
+          hlog.debug(
+            userId,
+            `GENERATION_ENDED ${id}: auto-refine skipped (payload missing chatId=${!!chatId} messageId=${!!messageId})`
+          );
+          return;
+        }
 
         const send = (m: BackendToFrontend) => sendTo(m, userId);
 
         const messages = await spindle.chat.getMessages(chatId);
         const msg = messages.find((m) => m.id === messageId);
-        if (msg?.role !== "assistant") return;
+        if (msg?.role !== "assistant") {
+          hlog.debug(
+            userId,
+            `GENERATION_ENDED ${id}: auto-refine skipped (target role=${msg?.role || "(not found)"})`
+          );
+          return;
+        }
 
-        hlog.debug(userId, `Auto-refine triggered for ${messageId} in chat ${chatId}`);
+        hlog.debug(userId, `Auto-refine triggered for ${messageId.slice(0, 8)} in chat ${chatId.slice(0, 8)}`);
         send({ type: "auto-refine-started", messageId });
         try {
           await refineSingle(chatId, messageId, userId, send);
@@ -120,6 +142,7 @@ export function registerEvents(sendTo: (m: BackendToFrontend, u: string) => void
           await sendRefinedStateFor(userId, send);
         } catch (err) {
           const error = err instanceof Error ? err.message : String(err);
+          hlog.debug(userId, `Auto-refine: refineSingle threw for ${messageId.slice(0, 8)}: ${error}`);
           spindle.log.warn(`Auto-refine failed: ${error}`);
           send({ type: "auto-refine-complete", messageId, success: false });
         }

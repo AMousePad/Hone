@@ -288,7 +288,13 @@ export type BackendToFrontend =
       lastAiStages?: StageRecord[];
       refinedMessageIds: string[];
     }
-  | { type: "generation-state"; generating: boolean };
+  | { type: "generation-state"; generating: boolean }
+  | {
+      type: "host-version-warning";
+      hostVersion: string | null;
+      minimum: string;
+      message: string;
+    };
 
 /** Lightweight preset summary for the preset bar dropdown. Avoids
  *  pushing the full HonePreset until the user selects one to edit. */

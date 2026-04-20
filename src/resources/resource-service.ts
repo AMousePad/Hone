@@ -79,17 +79,29 @@ export function createResourceService<
     async list(userId) {
       const summaries: S[] = cfg.builtIns.map((b) => cfg.summarize(b, true));
       const customs: S[] = [];
-      for (const id of await listCustomIds(userId)) {
+      const customIds = await listCustomIds(userId);
+      let skipped = 0;
+      for (const id of customIds) {
         const item = await loadCustom(userId, id);
         if (item) customs.push(cfg.summarize(item, false));
+        else skipped++;
       }
       customs.sort((a, b) => a.name.localeCompare(b.name));
+      hlog.debug(
+        userId,
+        `${cfg.kind}: list -> ${customs.length} custom (+${summaries.length} built-in)${skipped > 0 ? `, ${skipped} custom id(s) failed to load` : ""}`
+      );
       return [...customs, ...summaries];
     },
     async get(userId, id) {
       const builtIn = cfg.builtIns.find((b) => b.id === id);
-      if (builtIn) return builtIn;
-      return loadCustom(userId, id);
+      if (builtIn) {
+        hlog.debug(userId, `${cfg.kind}: get "${id}" -> built-in hit`);
+        return builtIn;
+      }
+      const loaded = await loadCustom(userId, id);
+      hlog.debug(userId, `${cfg.kind}: get "${id}" -> ${loaded ? "custom hit" : "miss"}`);
+      return loaded;
     },
     getBuiltIn(id) {
       return cfg.builtIns.find((b) => b.id === id) ?? null;
@@ -99,26 +111,34 @@ export function createResourceService<
     },
     async save(userId, item) {
       if (builtInIds.has(item.id)) {
+        hlog.debug(userId, `${cfg.kind}: save "${item.id}" rejected (built-in)`);
         throw new Error(`Cannot overwrite built-in ${cfg.kind} "${item.id}"`);
       }
       assertSafeId(item.id);
       cfg.validateSave?.(item);
       await setJson(pathFor(item.id), item, userId);
+      hlog.debug(userId, `${cfg.kind}: save "${item.id}" -> persisted`);
     },
     async delete(userId, id) {
       if (builtInIds.has(id)) {
+        hlog.debug(userId, `${cfg.kind}: delete "${id}" rejected (built-in)`);
         throw new Error(`Cannot delete built-in ${cfg.kind} "${id}"`);
       }
       assertSafeId(id);
       await deletePath(pathFor(id), userId);
+      hlog.debug(userId, `${cfg.kind}: delete "${id}" -> removed`);
     },
     async duplicate(userId, sourceId) {
       const source = await this.get(userId, sourceId);
-      if (!source) throw new Error(`${cfg.kind} "${sourceId}" not found`);
+      if (!source) {
+        hlog.debug(userId, `${cfg.kind}: duplicate "${sourceId}" -> source not found`);
+        throw new Error(`${cfg.kind} "${sourceId}" not found`);
+      }
       const newName = `${source.name} (Copy)`;
       const newId = await uniqueId(userId, newName);
       const copy = cfg.buildCopy(source, newId, newName);
       await this.save(userId, copy);
+      hlog.debug(userId, `${cfg.kind}: duplicate "${sourceId}" -> new id "${newId}"`);
       return copy;
     },
     async exists(userId, id) {

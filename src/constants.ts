@@ -2,6 +2,11 @@
  *  this file free of runtime dependencies so it can be bundled into
  *  either target without pulling in backend-only modules. */
 
+import manifest from "../spindle.json";
+
+export const HONE_VERSION: string = manifest.version;
+export const HONE_MINIMUM_LUMIVERSE_VERSION: string = manifest.minimum_lumiverse_version;
+
 /** Virtual default model profile id. Never persisted; represents
  *  "use the user's default Lumiverse connection with no sampler
  *  overrides and auto-strip reasoning tags". */

@@ -22,9 +22,19 @@
  * overflow, up to 20k entries per call under heavy bulk refines.
  */
 
-const DEFAULT_MAX_ENTRIES = 2000;
+import { HONE_VERSION } from "./constants";
+
+const DEFAULT_MAX_ENTRIES = 20000;
 const MIN_MAX_ENTRIES = 100;
 const MAX_MAX_ENTRIES = 20000;
+
+let lumiverseBackendVersion: string | null = null;
+let lumiverseFrontendVersion: string | null = null;
+
+export function setHostVersions(backend: string | null, frontend: string | null): void {
+  lumiverseBackendVersion = backend;
+  lumiverseFrontendVersion = frontend;
+}
 
 interface LogEntry {
   ts: number;
@@ -147,11 +157,18 @@ export function getLogs(userId: string): LogEntry[] {
 }
 
 /** Format the buffer as a newline-separated string with HH:MM:SS.mmm
- *  timestamps, ready for clipboard export. */
+ *  timestamps, ready for clipboard export. A header line stamps the
+ *  Hone version and buffer geometry so shared logs are
+ *  self-identifying. */
 export function formatLogs(userId: string): string {
   const entries = getLogs(userId);
-  if (entries.length === 0) return "(no debug log entries)";
-  const lines: string[] = new Array(entries.length);
+  const cap = capacityCache.get(userId) ?? DEFAULT_MAX_ENTRIES;
+  const lvBackend = lumiverseBackendVersion ?? "unknown";
+  const lvFrontend = lumiverseFrontendVersion ?? "unknown";
+  const header = `# Hone v${HONE_VERSION} | Lumiverse backend=${lvBackend} frontend=${lvFrontend} | entries=${entries.length}/${cap} | exportedAt=${new Date().toISOString()}`;
+  if (entries.length === 0) return `${header}\n(no debug log entries)`;
+  const lines: string[] = new Array(entries.length + 1);
+  lines[0] = header;
   for (let i = 0; i < entries.length; i++) {
     const e = entries[i];
     const d = new Date(e.ts);
@@ -159,7 +176,7 @@ export function formatLogs(userId: string): string {
     const m = String(d.getMinutes()).padStart(2, "0");
     const s = String(d.getSeconds()).padStart(2, "0");
     const ms = String(d.getMilliseconds()).padStart(3, "0");
-    lines[i] = `[${h}:${m}:${s}.${ms}] ${e.msg}`;
+    lines[i + 1] = `[${h}:${m}:${s}.${ms}] ${e.msg}`;
   }
   return lines.join("\n");
 }

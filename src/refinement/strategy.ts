@@ -83,12 +83,24 @@ async function runPipeline(
     const result = await generate(req, input.userId, { signal: input.signal });
     if (!result.success) {
       if (result.aborted) {
+        hlog.debug(input.userId, `runPipeline stage ${i + 1} "${stage.name}": aborted, propagating`);
         throw makeAbortError(result.error || "ABORTED");
       }
+      hlog.debug(
+        input.userId,
+        `runPipeline stage ${i + 1} "${stage.name}": generate failed: ${result.error || "(no error)"}`
+      );
       throw new Error(result.error || `Stage "${stage.name}" failed`);
     }
 
-    const rawContent = stageModel.reasoning.stripCoTTags ? removeCoTTags(result.content) : result.content;
+    const stripCoT = stageModel.reasoning.stripCoTTags;
+    const rawContent = stripCoT ? removeCoTTags(result.content) : result.content;
+    if (stripCoT && rawContent.length !== result.content.length) {
+      hlog.debug(
+        input.userId,
+        `runPipeline stage ${i + 1} "${stage.name}": stripped CoT tags ${result.content.length} -> ${rawContent.length}`
+      );
+    }
     const extracted = extractRefinedContent(rawContent);
     if (!extracted.ok) {
       hlog.debug(
@@ -98,6 +110,10 @@ async function runPipeline(
       throw new Error(extracted.message);
     }
     for (const r of extracted.recoveries) hlog.debug(input.userId, `stage "${stage.name}": ${r}`);
+    hlog.debug(
+      input.userId,
+      `runPipeline stage ${i + 1} "${stage.name}": extracted content len=${extracted.content.length} (raw=${rawContent.length})`
+    );
     latest = extracted.content;
 
     if (emitStages) {
@@ -168,16 +184,28 @@ async function runParallel(input: RunStrategyInput): Promise<RunStrategyResult> 
 }
 
 export async function runStrategy(input: RunStrategyInput): Promise<RunStrategyResult> {
+  const startedAt = Date.now();
   hlog.debug(
     input.userId,
-    `runStrategy: preset="${input.preset.name}" strategy=${input.preset.strategy} messageLen=${input.messageText.length} latestLen=${input.latest.length} contextLen=${input.context.length}`
+    `runStrategy: preset="${input.preset.name}" strategy=${input.preset.strategy} messageLen=${input.messageText.length} latestLen=${input.latest.length} contextLen=${input.context.length} loreLen=${input.loreBlock.length} povLen=${input.pov.length}`
   );
-  if (input.preset.strategy === "parallel") return runParallel(input);
+  if (input.preset.strategy === "parallel") {
+    const out = await runParallel(input);
+    hlog.debug(
+      input.userId,
+      `runStrategy: parallel complete: finalLen=${out.refinedText.length} stages=${out.stages.length} elapsed=${Date.now() - startedAt}ms`
+    );
+    return out;
+  }
   if (!input.preset.pipeline) {
+    hlog.debug(input.userId, `runStrategy: preset "${input.preset.id}" has strategy=pipeline but no pipeline configured`);
     throw new Error(`Preset "${input.preset.id}" has strategy=pipeline but no pipeline configured`);
   }
   hlog.debug(input.userId, `runStrategy: executing pipeline with ${input.preset.pipeline.stages.length} stages`);
   const run = await runPipeline(input.preset.pipeline, input, input.latest, undefined, true);
-  hlog.debug(input.userId, `runStrategy: pipeline complete: finalLen=${run.finalText.length} stages=${run.stages.length}`);
+  hlog.debug(
+    input.userId,
+    `runStrategy: pipeline complete: finalLen=${run.finalText.length} stages=${run.stages.length} elapsed=${Date.now() - startedAt}ms`
+  );
   return { refinedText: run.finalText, stages: run.stages, strategy: "pipeline" };
 }

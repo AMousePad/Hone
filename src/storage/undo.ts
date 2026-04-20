@@ -114,8 +114,16 @@ export async function saveUndo(
     const evicted = index.queue.shift()!;
     try {
       await removeSwipeSlot(userId, chatId, evicted.m, evicted.s);
+      hlog.debug(
+        userId,
+        `saveUndo: evicted ${evicted.m.slice(0, 8)}/${evicted.s} (queue over ${MAX_UNDO_PER_CHAT})`
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      hlog.debug(
+        userId,
+        `saveUndo: evict threw for ${evicted.m.slice(0, 8)}/${evicted.s}: ${message}, continuing`
+      );
       spindle.log.warn(
         `[Hone] saveUndo: failed to evict ${evicted.m.slice(0, 8)}/${evicted.s} during prune: ${message}; continuing`
       );

@@ -1,6 +1,7 @@
 declare const spindle: import("lumiverse-spindle-types").SpindleAPI;
 
 import type { ChatStats } from "../types";
+import * as hlog from "../hlog";
 
 const STATS_PREFIX = "stats/";
 
@@ -15,10 +16,15 @@ const DEFAULT_STATS: ChatStats = {
 };
 
 export async function getStats(userId: string, chatId: string): Promise<ChatStats> {
-  return spindle.userStorage.getJson<ChatStats>(statsFile(chatId), {
+  const stats = await spindle.userStorage.getJson<ChatStats>(statsFile(chatId), {
     fallback: { ...DEFAULT_STATS },
     userId,
   });
+  hlog.debug(
+    userId,
+    `getStats: chat=${chatId.slice(0, 8)} messagesRefined=${stats.messagesRefined} totalRefinements=${stats.totalRefinements}`
+  );
+  return stats;
 }
 
 export async function incrementStats(
@@ -27,9 +33,16 @@ export async function incrementStats(
   strategy: string,
   count: number = 1
 ): Promise<void> {
-  const stats = await getStats(userId, chatId);
+  const stats = await spindle.userStorage.getJson<ChatStats>(statsFile(chatId), {
+    fallback: { ...DEFAULT_STATS },
+    userId,
+  });
   stats.messagesRefined += count;
   stats.totalRefinements += count;
   stats.byStrategy[strategy] = (stats.byStrategy[strategy] || 0) + count;
   await spindle.userStorage.setJson(statsFile(chatId), stats, { userId });
+  hlog.debug(
+    userId,
+    `incrementStats: chat=${chatId.slice(0, 8)} strategy="${strategy}" +${count} -> totalRefinements=${stats.totalRefinements} strategyCount=${stats.byStrategy[strategy]}`
+  );
 }
